@@ -1,14 +1,19 @@
 #!/bin/sh
 # test.sh
-# Summary: Validation suite for wvw functionality.
+# Summary: Validation suite for wvw CLI parsing and library API behavior.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
 # License: https://www.gnu.org/licenses/gpl-3.0.html
+
+PASS=0
+FAIL=0
+TMP_ROOT=
 
 # Prints one failure line.
 # @param $1 Failure message.
 # @return 1 on failure.
 kc_test_fail() {
+    FAIL=$((FAIL + 1))
     printf '\033[31m[FAIL]\033[0m %s\n' "$1"
     return 1
 }
@@ -17,7 +22,9 @@ kc_test_fail() {
 # @param $1 Success message.
 # @return 0 on success.
 kc_test_pass() {
+    PASS=$((PASS + 1))
     printf '\033[32m[PASS]\033[0m %s\n' "$1"
+    return 0
 }
 
 # Detects the artifact architecture for the current machine.
@@ -52,26 +59,182 @@ kc_test_binary_path() {
     printf './bin/%s/%s/wvw\n' "$(kc_test_arch)" "$(kc_test_platform)"
 }
 
-# Verifies the binary exists and is executable.
+# Returns the shared library path for the current architecture and platform.
+# @return Shared library path on stdout.
+kc_test_shared_library_path() {
+    printf './bin/%s/%s/libwvw.so\n' "$(kc_test_arch)" "$(kc_test_platform)"
+}
+
+# Returns the static library path for the current architecture and platform.
+# @return Static library path on stdout.
+kc_test_static_library_path() {
+    printf './bin/%s/%s/libwvw.a\n' "$(kc_test_arch)" "$(kc_test_platform)"
+}
+
+# Verifies the CLI and library artifacts exist.
 # @return 0 on success or 1 on failure.
-kc_test_check_binary() {
+kc_test_check_artifacts() {
     if [ ! -x "$BIN" ]; then
         kc_test_fail "binary not found: $BIN"
         return 1
     fi
-
+    if [ ! -f "$SHARED_LIB" ]; then
+        kc_test_fail "shared library not found: $SHARED_LIB"
+        return 1
+    fi
+    if [ ! -f "$STATIC_LIB" ]; then
+        kc_test_fail "static library not found: $STATIC_LIB"
+        return 1
+    fi
+    kc_test_pass "artifacts"
     return 0
 }
 
-# Tests that the binary rejects missing URLs.
+# Verifies the CLI rejects a missing URL.
 # @return 0 on success or 1 on failure.
-kc_test_missing_url() {
-    if "$BIN" --title "test" > /dev/null 2>&1; then
-        kc_test_fail "missing URL validation"
+kc_test_cli_missing_url() {
+    if "$BIN" --title test > /dev/null 2>&1; then
+        kc_test_fail "cli missing URL"
         return 1
     fi
+    kc_test_pass "cli missing URL"
+    return 0
+}
 
-    kc_test_pass "missing URL validation"
+# Verifies the CLI rejects a missing --url value.
+# @return 0 on success or 1 on failure.
+kc_test_cli_missing_url_value() {
+    if "$BIN" --url > /dev/null 2>&1; then
+        kc_test_fail "cli missing --url value"
+        return 1
+    fi
+    kc_test_pass "cli missing --url value"
+    return 0
+}
+
+# Verifies the CLI rejects a missing --title value.
+# @return 0 on success or 1 on failure.
+kc_test_cli_missing_title_value() {
+    if "$BIN" --url https://example.com --title > /dev/null 2>&1; then
+        kc_test_fail "cli missing --title value"
+        return 1
+    fi
+    kc_test_pass "cli missing --title value"
+    return 0
+}
+
+# Verifies the CLI rejects an invalid width value.
+# @return 0 on success or 1 on failure.
+kc_test_cli_invalid_width() {
+    if "$BIN" --url https://example.com --width wide > /dev/null 2>&1; then
+        kc_test_fail "cli invalid width"
+        return 1
+    fi
+    kc_test_pass "cli invalid width"
+    return 0
+}
+
+# Verifies the CLI rejects an invalid height value.
+# @return 0 on success or 1 on failure.
+kc_test_cli_invalid_height() {
+    if "$BIN" --url https://example.com --height tall > /dev/null 2>&1; then
+        kc_test_fail "cli invalid height"
+        return 1
+    fi
+    kc_test_pass "cli invalid height"
+    return 0
+}
+
+# Verifies the CLI rejects unknown options.
+# @return 0 on success or 1 on failure.
+kc_test_cli_unknown_option() {
+    if "$BIN" --url https://example.com --bogus > /dev/null 2>&1; then
+        kc_test_fail "cli unknown option"
+        return 1
+    fi
+    kc_test_pass "cli unknown option"
+    return 0
+}
+
+# Writes the helper source that validates the public library API.
+# @param $1 Destination source file path.
+# @return 0 on success.
+kc_test_write_helper() {
+    printf '%s\n' \
+        '#include "wvw.h"' \
+        '#include <signal.h>' \
+        '#include <stdlib.h>' \
+        '#include <string.h>' \
+        '' \
+        'int main(void) {' \
+        '    kc_wvw_t *ctx = NULL;' \
+        '    kc_wvw_options_t opts = kc_wvw_options_default();' \
+        '' \
+        '    if (opts.url != NULL || opts.title != NULL) return 1;' \
+        '    if (opts.width != 1280 || opts.height != 720) return 1;' \
+        '    if (opts.fullscreen != 0 || opts.borderless != 0) return 1;' \
+        '' \
+        '    setenv("KC_WVW_URL", "https://example.com", 1);' \
+        '    setenv("KC_WVW_TITLE", "Example", 1);' \
+        '    setenv("KC_WVW_WIDTH", "1440", 1);' \
+        '    setenv("KC_WVW_HEIGHT", "900", 1);' \
+        '    setenv("KC_WVW_FULLSCREEN", "1", 1);' \
+        '    setenv("KC_WVW_BORDERLESS", "1", 1);' \
+        '    kc_wvw_options_load_env(&opts);' \
+        '    if (!opts.url || strcmp(opts.url, "https://example.com") != 0) return 1;' \
+        '    if (!opts.title || strcmp(opts.title, "Example") != 0) return 1;' \
+        '    if (opts.width != 1440 || opts.height != 900) return 1;' \
+        '    if (opts.fullscreen != 1 || opts.borderless != 1) return 1;' \
+        '' \
+        '    setenv("KC_WVW_WIDTH", "bad", 1);' \
+        '    setenv("KC_WVW_HEIGHT", "nope", 1);' \
+        '    kc_wvw_options_load_env(&opts);' \
+        '    if (opts.width != 1440 || opts.height != 900) return 1;' \
+        '' \
+        '    kc_wvw_options_free(&opts);' \
+        '    if (opts.url != NULL || opts.title != NULL) return 1;' \
+        '' \
+        '    unsetenv("KC_WVW_URL");' \
+        '    unsetenv("KC_WVW_TITLE");' \
+        '    unsetenv("KC_WVW_WIDTH");' \
+        '    unsetenv("KC_WVW_HEIGHT");' \
+        '    unsetenv("KC_WVW_FULLSCREEN");' \
+        '    unsetenv("KC_WVW_BORDERLESS");' \
+        '' \
+        '    if (kc_wvw_open(NULL, &opts) != KC_WVW_ERROR) return 1;' \
+        '    if (kc_wvw_open(&ctx, NULL) != KC_WVW_ERROR) return 1;' \
+        '    if (kc_wvw_open(&ctx, &opts) != KC_WVW_ERROR) return 1;' \
+        '    if (kc_wvw_close(NULL) != KC_WVW_OK) return 1;' \
+        '    if (kc_wvw_run(NULL) != KC_WVW_ERROR) return 1;' \
+        '    if (kc_wvw_navigate(NULL, "https://example.com") != KC_WVW_ERROR) return 1;' \
+        '    if (kc_wvw_on_signal(NULL, SIGINT, NULL) != KC_WVW_ERROR) return 1;' \
+        '    if (kc_wvw_raise_signal(NULL, SIGINT) != KC_WVW_ERROR) return 1;' \
+        '    if (kc_wvw_listen_signals(NULL) != KC_WVW_ERROR) return 1;' \
+        '    if (kc_wvw_listen_signal(NULL, SIGINT) != KC_WVW_ERROR) return 1;' \
+        '' \
+        '    return 0;' \
+        '}' > "$1"
+    return 0
+}
+
+# Compiles and runs one helper against the built shared library.
+# @return 0 on success or 1 on failure.
+kc_test_library_api() {
+    helper_c="$TMP_ROOT/wvw-api-test.c"
+    helper_bin="$TMP_ROOT/wvw-api-test"
+    lib_dir=$(dirname "$SHARED_LIB")
+
+    kc_test_write_helper "$helper_c" || return 1
+    if ! cc -I./src "$helper_c" -L"$lib_dir" -Wl,-rpath,"$lib_dir" -lwvw -o "$helper_bin"; then
+        kc_test_fail "library API compile"
+        return 1
+    fi
+    if ! LD_LIBRARY_PATH="$lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$helper_bin"; then
+        kc_test_fail "library API runtime"
+        return 1
+    fi
+    kc_test_pass "library API"
+    return 0
 }
 
 # Runs the full validation suite.
@@ -79,13 +242,29 @@ kc_test_missing_url() {
 kc_test_main() {
     failed=0
 
+    TMP_ROOT=$(mktemp -d)
     BIN=$(kc_test_binary_path)
+    SHARED_LIB=$(kc_test_shared_library_path)
+    STATIC_LIB=$(kc_test_static_library_path)
 
-    kc_test_check_binary || exit 1
+    kc_test_check_artifacts || return 1
+    kc_test_cli_missing_url || failed=$((failed + 1))
+    kc_test_cli_missing_url_value || failed=$((failed + 1))
+    kc_test_cli_missing_title_value || failed=$((failed + 1))
+    kc_test_cli_invalid_width || failed=$((failed + 1))
+    kc_test_cli_invalid_height || failed=$((failed + 1))
+    kc_test_cli_unknown_option || failed=$((failed + 1))
+    kc_test_library_api || failed=$((failed + 1))
 
-    kc_test_missing_url || failed=$((failed + 1))
-
-    return $failed
+    if [ "$failed" -ne 0 ]; then
+        return 1
+    fi
+    return 0
 }
 
-kc_test_main
+trap 'if [ -n "$TMP_ROOT" ] && [ -d "$TMP_ROOT" ]; then rm -rf "$TMP_ROOT"; fi' EXIT HUP INT TERM
+
+if kc_test_main; then
+    exit 0
+fi
+exit 1
