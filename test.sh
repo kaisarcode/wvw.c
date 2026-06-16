@@ -75,18 +75,18 @@ kc_test_static_library_path() {
 # @return 0 on success or 1 on failure.
 kc_test_check_artifacts() {
     if [ ! -x "$BIN" ]; then
-        kc_test_fail "binary not found: $BIN"
+        kc_test_fail "binary path: expected executable at $BIN, got missing"
         return 1
     fi
     if [ ! -f "$SHARED_LIB" ]; then
-        kc_test_fail "shared library not found: $SHARED_LIB"
+        kc_test_fail "shared library path: expected file at $SHARED_LIB, got missing"
         return 1
     fi
     if [ ! -f "$STATIC_LIB" ]; then
-        kc_test_fail "static library not found: $STATIC_LIB"
+        kc_test_fail "static library path: expected file at $STATIC_LIB, got missing"
         return 1
     fi
-    kc_test_pass "artifacts"
+    kc_test_pass "artifacts present: binary and shared/static libraries found"
     return 0
 }
 
@@ -94,10 +94,10 @@ kc_test_check_artifacts() {
 # @return 0 on success or 1 on failure.
 kc_test_cli_missing_url() {
     if "$BIN" --title test > /dev/null 2>&1; then
-        kc_test_fail "cli missing URL"
+        kc_test_fail "missing URL: expected non-zero exit, got 0"
         return 1
     fi
-    kc_test_pass "cli missing URL"
+    kc_test_pass "missing URL: expected non-zero exit, got non-zero"
     return 0
 }
 
@@ -105,10 +105,10 @@ kc_test_cli_missing_url() {
 # @return 0 on success or 1 on failure.
 kc_test_cli_missing_url_value() {
     if "$BIN" --url > /dev/null 2>&1; then
-        kc_test_fail "cli missing --url value"
+        kc_test_fail "--url without value: expected non-zero exit, got 0"
         return 1
     fi
-    kc_test_pass "cli missing --url value"
+    kc_test_pass "--url without value: expected non-zero exit, got non-zero"
     return 0
 }
 
@@ -116,10 +116,10 @@ kc_test_cli_missing_url_value() {
 # @return 0 on success or 1 on failure.
 kc_test_cli_missing_title_value() {
     if "$BIN" --url https://example.com --title > /dev/null 2>&1; then
-        kc_test_fail "cli missing --title value"
+        kc_test_fail "--title without value: expected non-zero exit, got 0"
         return 1
     fi
-    kc_test_pass "cli missing --title value"
+    kc_test_pass "--title without value: expected non-zero exit, got non-zero"
     return 0
 }
 
@@ -127,10 +127,10 @@ kc_test_cli_missing_title_value() {
 # @return 0 on success or 1 on failure.
 kc_test_cli_invalid_width() {
     if "$BIN" --url https://example.com --width wide > /dev/null 2>&1; then
-        kc_test_fail "cli invalid width"
+        kc_test_fail "invalid width input 'wide': expected non-zero exit, got 0"
         return 1
     fi
-    kc_test_pass "cli invalid width"
+    kc_test_pass "invalid width input 'wide': expected non-zero exit, got non-zero"
     return 0
 }
 
@@ -138,10 +138,10 @@ kc_test_cli_invalid_width() {
 # @return 0 on success or 1 on failure.
 kc_test_cli_invalid_height() {
     if "$BIN" --url https://example.com --height tall > /dev/null 2>&1; then
-        kc_test_fail "cli invalid height"
+        kc_test_fail "invalid height input 'tall': expected non-zero exit, got 0"
         return 1
     fi
-    kc_test_pass "cli invalid height"
+    kc_test_pass "invalid height input 'tall': expected non-zero exit, got non-zero"
     return 0
 }
 
@@ -149,10 +149,10 @@ kc_test_cli_invalid_height() {
 # @return 0 on success or 1 on failure.
 kc_test_cli_unknown_option() {
     if "$BIN" --url https://example.com --bogus > /dev/null 2>&1; then
-        kc_test_fail "cli unknown option"
+        kc_test_fail "unknown option '--bogus': expected non-zero exit, got 0"
         return 1
     fi
-    kc_test_pass "cli unknown option"
+    kc_test_pass "unknown option '--bogus': expected non-zero exit, got non-zero"
     return 0
 }
 
@@ -226,14 +226,14 @@ kc_test_library_api() {
 
     kc_test_write_helper "$helper_c" || return 1
     if ! cc -I./src "$helper_c" -L"$lib_dir" -Wl,-rpath,"$lib_dir" -lwvw -o "$helper_bin"; then
-        kc_test_fail "library API compile"
+        kc_test_fail "library API helper compile: expected success, got compiler failure"
         return 1
     fi
     if ! LD_LIBRARY_PATH="$lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$helper_bin"; then
-        kc_test_fail "library API runtime"
+        kc_test_fail "library API contract helper: expected exit 0, got non-zero"
         return 1
     fi
-    kc_test_pass "library API"
+    kc_test_pass "library API contracts: defaults, env loading, null guards, and signal hooks matched expectations"
     return 0
 }
 
