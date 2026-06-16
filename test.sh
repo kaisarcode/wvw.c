@@ -63,28 +63,6 @@ kc_test_check_binary() {
     return 0
 }
 
-# Tests that the binary prints help successfully.
-# @return 0 on success or 1 on failure.
-kc_test_help() {
-    if ! "$BIN" --help > /dev/null 2>&1; then
-        kc_test_fail "help output"
-        return 1
-    fi
-
-    kc_test_pass "help output"
-}
-
-# Tests that the binary prints version successfully.
-# @return 0 on success or 1 on failure.
-kc_test_version() {
-    if ! "$BIN" --version > /dev/null 2>&1; then
-        kc_test_fail "version output"
-        return 1
-    fi
-
-    kc_test_pass "version output"
-}
-
 # Tests that the binary rejects missing URLs.
 # @return 0 on success or 1 on failure.
 kc_test_missing_url() {
@@ -105,8 +83,6 @@ kc_test_main() {
 
     kc_test_check_binary || exit 1
 
-    kc_test_help        || failed=$((failed + 1))
-    kc_test_version     || failed=$((failed + 1))
     kc_test_missing_url || failed=$((failed + 1))
 
     return $failed

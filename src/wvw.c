@@ -14,8 +14,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define KC_WVW_VERSION "1.0.0"
-
 /**
  * Print command usage information.
  * @param name Program executable name.
@@ -32,15 +30,7 @@ static void kc_print_help(const char *name) {
     printf("    --fullscreen      Start in fullscreen mode\n");
     printf("    --borderless      Start in borderless mode\n");
     printf("    -h, --help        Show this help\n");
-    printf("    -v, --version     Show version\n");
-}
-
-/**
- * Print command version information.
- * @return None.
- */
-static void kc_print_version(void) {
-    printf("wvw %s\n", KC_WVW_VERSION);
+    printf("    -v, --version     Show build version\n");
 }
 
 /**
@@ -94,7 +84,8 @@ int main(int argc, char **argv) {
             kc_wvw_options_free(&opts);
             return 0;
         } else if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--version") == 0) {
-            kc_print_version();
+            printf("wvw build %llu\n",
+                (unsigned long long)kc_wvw_version());
             kc_wvw_options_free(&opts);
             return 0;
         } else if (strcmp(argv[i], "--url") == 0) {

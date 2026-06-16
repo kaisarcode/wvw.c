@@ -107,6 +107,18 @@ struct kc_wvw {
 #endif
 };
 
+#ifndef KC_WVW_BUILD_VERSION
+#define KC_WVW_BUILD_VERSION 0
+#endif
+
+/**
+ * Returns the build version generated at compile time.
+ * @return Unix timestamp for the current build.
+ */
+uint64_t kc_wvw_version(void) {
+    return (uint64_t)KC_WVW_BUILD_VERSION;
+}
+
 /**
  * Duplicate one C string.
  * @param text Source string.

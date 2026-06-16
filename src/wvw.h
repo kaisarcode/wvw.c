@@ -10,6 +10,8 @@
 #ifndef KC_WVW_H
 #define KC_WVW_H
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -29,6 +31,12 @@ typedef struct {
     int fullscreen;
     int borderless;
 } kc_wvw_options_t;
+
+/**
+ * Returns the build version generated at compile time.
+ * @return Unix timestamp for the current build.
+ */
+uint64_t kc_wvw_version(void);
 
 /**
  * Create an options struct initialized with default values.

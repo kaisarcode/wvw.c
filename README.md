@@ -45,7 +45,7 @@ Start in fullscreen mode:
 | `--fullscreen` | Open the window in fullscreen mode. |
 | `--borderless` | Open the window without native decorations. |
 | `-h`, `--help` | Show help and usage. |
-| `-v`, `--version` | Show version. |
+| `-v`, `--version` | Show build version. |
 
 ---
 
