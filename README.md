@@ -2,6 +2,11 @@
 
 `wvw.c` is a small C library and CLI for opening one native window that hosts a WebView.
 
+Backends:
+
+- Linux uses WebKitGTK.
+- Windows uses Microsoft Edge WebView2.
+
 ---
 
 ## CLI
@@ -105,6 +110,48 @@ make all
 make x86_64/linux
 make x86_64/windows
 ```
+
+The Windows target builds the backend as C++ and uses the official Microsoft Edge WebView2 Win32 SDK files stored under `lib/windows/x86_64/`.
+
+`make x86_64/windows` copies the architecture-matched `WebView2Loader.dll` from `lib/windows/x86_64/bin/` to `bin/x86_64/windows/` beside `wvw.exe`.
+
+The current Windows cross-build path uses MinGW-w64:
+
+```bash
+make x86_64/windows
+```
+
+Native MSVC builds are supported by the CMake project when the same WebView2 SDK files are available, but this repository's default workflow is the Make target above.
+
+---
+
+## Windows Runtime
+
+Windows 10 and Windows 11 require the Microsoft Edge WebView2 Evergreen Runtime installed on the target machine.
+
+The library does not install or download the runtime. Runtime installation belongs to application packaging.
+
+If the runtime is missing, `kc_wvw_open()` returns `KC_WVW_ERROR` and the backend prints:
+
+```text
+wvw: Microsoft Edge WebView2 Runtime is required
+```
+
+Windows packages must include these files together:
+
+- `wvw.exe`
+- `libwvw.dll`
+- `WebView2Loader.dll`
+
+The loader must be the matching architecture and must remain beside `wvw.exe`. The backend does not search arbitrary directories.
+
+WebView2 stores persistent browser state under:
+
+```text
+%LOCALAPPDATA%\KaisarCode\wvw\WebView2
+```
+
+Wine is not an officially supported validation target for the Windows WebView2 backend. Validate on native Windows 10 or Windows 11.
 
 ---
 
