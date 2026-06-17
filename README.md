@@ -64,6 +64,7 @@ Start in fullscreen mode:
 | `KC_WVW_HEIGHT` | Default window height. |
 | `KC_WVW_FULLSCREEN` | Default fullscreen flag (`0` or `1`). |
 | `KC_WVW_BORDERLESS` | Default borderless flag (`0` or `1`). |
+| `KC_WVW_BROWSER_ARGS` | Windows WebView2 browser arguments. |
 
 ---
 
@@ -151,7 +152,7 @@ WebView2 stores persistent browser state under:
 %LOCALAPPDATA%\KaisarCode\wvw\WebView2
 ```
 
-Wine is not an officially supported validation target for the Windows WebView2 backend. Validate on native Windows 10 or Windows 11.
+Wine can run the Windows backend when the prefix provides a working WebView2 rendering path. `KC_WVW_BROWSER_ARGS` is available for explicit WebView2 diagnostics and runtime experiments.
 
 ---
 

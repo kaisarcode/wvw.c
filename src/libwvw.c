@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 #include <windows.h>
 
 #define KC_WVW_CLOSE_MESSAGE (WM_APP + 1)
@@ -116,6 +117,17 @@ static ICoreWebView2CreateCoreWebView2ControllerCompletedHandlerVtbl kc_wvw_cont
     kc_wvw_controller_release,
     kc_wvw_controller_invoke
 };
+
+/**
+ * Detects whether the process is running under Wine.
+ * @return Non-zero under Wine, otherwise zero.
+ */
+static int kc_wvw_is_wine(void) {
+    HMODULE ntdll;
+
+    ntdll = GetModuleHandleW(L"ntdll.dll");
+    return ntdll && GetProcAddress(ntdll, "wine_get_version");
+}
 
 /**
  * Allocates a WebView2 environment completion handler.
@@ -251,6 +263,14 @@ static ULONG STDMETHODCALLTYPE kc_wvw_controller_release(ICoreWebView2CreateCore
         free(handler);
     }
     return next;
+}
+
+/**
+ * Returns the browser arguments for the WebView2 environment.
+ * @return Argument string or NULL.
+ */
+static const char *kc_wvw_browser_args(void) {
+    return getenv("KC_WVW_BROWSER_ARGS");
 }
 
 /**
@@ -572,6 +592,12 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
             ICoreWebView2Controller_MoveFocus(ctx->controller, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
         }
         return 0;
+    case WM_SETCURSOR:
+        if (kc_wvw_is_wine()) {
+            SetCursor(LoadCursor(NULL, IDC_ARROW));
+            return TRUE;
+        }
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
     case WM_CLOSE:
         kc_wvw_request_close(ctx);
         return 0;
@@ -667,6 +693,7 @@ static int kc_wvw_start_webview(kc_wvw_t *ctx) {
     FARPROC get_version_proc;
     kc_wvw_environment_handler_t *handler;
     wchar_t *user_data_dir;
+    const char *browser_args;
     LPWSTR version = NULL;
     HRESULT hr;
 
@@ -689,6 +716,11 @@ static int kc_wvw_start_webview(kc_wvw_t *ctx) {
     user_data_dir = kc_wvw_user_data_dir();
     if (!user_data_dir) {
         return KC_WVW_ERROR;
+    }
+
+    browser_args = kc_wvw_browser_args();
+    if (browser_args && *browser_args && !getenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")) {
+        SetEnvironmentVariableA("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", browser_args);
     }
 
     handler = kc_wvw_environment_handler_new(ctx);
