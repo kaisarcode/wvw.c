@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
-project(wvw C CXX)
+project(wvw C)
 
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 11)
 
 if(NOT DEFINED WVW_BUILD_VERSION)
     set(WVW_BUILD_VERSION 0)
@@ -22,36 +21,43 @@ endif()
 
 if(WIN32)
     set(WVW_SOURCES
-        src/libwvw-win.cpp
+        src/libwvw.c
     )
-    set(WVW_WEBVIEW2_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/windows/x86_64")
-    if(NOT EXISTS "${WVW_WEBVIEW2_SDK_DIR}/include/WebView2.h")
-        message(FATAL_ERROR "Missing ${WVW_WEBVIEW2_SDK_DIR}/include/WebView2.h")
+    set(WVW_WEBVIEW2_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/webview2/include")
+    set(WVW_WEBVIEW2_LOADER "${CMAKE_CURRENT_SOURCE_DIR}/lib/webview2/bin/x86_64/WebView2Loader.dll")
+    if(NOT EXISTS "${WVW_WEBVIEW2_INCLUDE_DIR}/WebView2.h")
+        message(FATAL_ERROR "Missing ${WVW_WEBVIEW2_INCLUDE_DIR}/WebView2.h")
     endif()
-    if(NOT EXISTS "${WVW_WEBVIEW2_SDK_DIR}/bin/WebView2Loader.dll")
-        message(FATAL_ERROR "Missing ${WVW_WEBVIEW2_SDK_DIR}/bin/WebView2Loader.dll")
+    if(NOT EXISTS "${WVW_WEBVIEW2_LOADER}")
+        message(FATAL_ERROR "Missing ${WVW_WEBVIEW2_LOADER}")
     endif()
 
-    set_source_files_properties(src/libwvw-win.cpp PROPERTIES
+    set_source_files_properties(src/libwvw.c PROPERTIES
         COMPILE_DEFINITIONS KC_WVW_BUILD_VERSION=${WVW_BUILD_VERSION}
     )
 
     add_executable(wvw src/wvw.c ${WVW_SOURCES})
-    target_include_directories(wvw PRIVATE src ${WVW_WEBVIEW2_SDK_DIR}/include)
-    target_compile_options(wvw PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-unknown-pragmas>)
+    target_include_directories(wvw PRIVATE src)
+    target_include_directories(wvw SYSTEM PRIVATE ${WVW_WEBVIEW2_INCLUDE_DIR})
     target_link_libraries(wvw ole32 uuid user32 gdi32 shell32)
+    if(MINGW)
+        target_link_options(wvw PRIVATE -static-libgcc)
+    endif()
 
     add_library(wvw_static STATIC ${WVW_SOURCES})
     set_target_properties(wvw_static PROPERTIES OUTPUT_NAME "wvw")
-    target_include_directories(wvw_static PRIVATE src ${WVW_WEBVIEW2_SDK_DIR}/include)
-    target_compile_options(wvw_static PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-unknown-pragmas>)
+    target_include_directories(wvw_static PRIVATE src)
+    target_include_directories(wvw_static SYSTEM PRIVATE ${WVW_WEBVIEW2_INCLUDE_DIR})
     target_link_libraries(wvw_static ole32 uuid user32 gdi32 shell32)
 
     add_library(wvw_shared SHARED ${WVW_SOURCES})
     set_target_properties(wvw_shared PROPERTIES OUTPUT_NAME "wvw")
-    target_include_directories(wvw_shared PRIVATE src ${WVW_WEBVIEW2_SDK_DIR}/include)
-    target_compile_options(wvw_shared PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-unknown-pragmas>)
+    target_include_directories(wvw_shared PRIVATE src)
+    target_include_directories(wvw_shared SYSTEM PRIVATE ${WVW_WEBVIEW2_INCLUDE_DIR})
     target_link_libraries(wvw_shared ole32 uuid user32 gdi32 shell32)
+    if(MINGW)
+        target_link_options(wvw_shared PRIVATE -static-libgcc)
+    endif()
 else()
     set(WVW_SOURCES
         src/libwvw.c

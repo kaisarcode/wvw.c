@@ -111,9 +111,9 @@ make x86_64/linux
 make x86_64/windows
 ```
 
-The Windows target builds the backend as C++ and uses the official Microsoft Edge WebView2 Win32 SDK files stored under `lib/windows/x86_64/`.
+The Windows target builds the backend as C and uses the official Microsoft Edge WebView2 Win32 SDK headers stored under `lib/webview2/include/`.
 
-`make x86_64/windows` copies the architecture-matched `WebView2Loader.dll` from `lib/windows/x86_64/bin/` to `bin/x86_64/windows/` beside `wvw.exe`.
+`make x86_64/windows` copies the architecture-matched `WebView2Loader.dll` from `lib/webview2/bin/x86_64/` to `bin/x86_64/windows/` beside `wvw.exe`.
 
 The current Windows cross-build path uses MinGW-w64:
 
