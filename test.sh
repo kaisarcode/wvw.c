@@ -166,9 +166,26 @@ kc_test_write_helper() {
         '#include <stdlib.h>' \
         '#include <string.h>' \
         '' \
+        'static int bridge_cb(' \
+        'kc_wvw_t *ctx,' \
+        'const char *method,' \
+        'const char *params_json,' \
+        'char **result_json,' \
+        'void *userdata' \
+        ') {' \
+        '    (void)ctx;' \
+        '    (void)method;' \
+        '    (void)params_json;' \
+        '    (void)result_json;' \
+        '    (void)userdata;' \
+        '    return KC_WVW_OK;' \
+        '}' \
+        '' \
         'int main(void) {' \
         '    kc_wvw_t *ctx = NULL;' \
         '    kc_wvw_options_t opts = kc_wvw_options_default();' \
+        '    const char *methods[] = { "Ping" };' \
+        '    kc_wvw_bridge_options_t bridge;' \
         '' \
         '    if (opts.url != NULL || opts.title != NULL) return 1;' \
         '    if (opts.width != 1280 || opts.height != 720) return 1;' \
@@ -211,6 +228,15 @@ kc_test_write_helper() {
         '    if (kc_wvw_raise_signal(NULL, SIGINT) != KC_WVW_ERROR) return 1;' \
         '    if (kc_wvw_listen_signals(NULL) != KC_WVW_ERROR) return 1;' \
         '    if (kc_wvw_listen_signal(NULL, SIGINT) != KC_WVW_ERROR) return 1;' \
+        '' \
+        '    memset(&bridge, 0, sizeof(bridge));' \
+        '    bridge.methods = methods;' \
+        '    bridge.method_count = 1;' \
+        '    bridge.callback = bridge_cb;' \
+        '    bridge.allow_file = 1;' \
+        '    if (kc_wvw_enable_bridge(NULL, &bridge) != KC_WVW_ERROR) return 1;' \
+        '    if (kc_wvw_enable_bridge(ctx, NULL) != KC_WVW_ERROR) return 1;' \
+        '    if (kc_wvw_post_bridge_event(NULL, "{}") != KC_WVW_ERROR) return 1;' \
         '' \
         '    return 0;' \
         '}' > "$1"

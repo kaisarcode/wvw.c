@@ -21,7 +21,17 @@ typedef struct kc_wvw kc_wvw_t;
 #define KC_WVW_OK 0
 #define KC_WVW_ERROR -1
 
+#define KC_WVW_BRIDGE_EVENT_NAME "nativebridge"
+
 typedef void (*kc_wvw_signal_callback_t)(kc_wvw_t *ctx);
+
+typedef int (*kc_wvw_bridge_callback_t)(
+kc_wvw_t *ctx,
+const char *method,
+const char *params_json,
+char **result_json,
+void *userdata
+);
 
 typedef struct {
     char *url;
@@ -32,6 +42,16 @@ typedef struct {
     int fullscreen;
     int borderless;
 } kc_wvw_options_t;
+
+typedef struct {
+    const char **methods;
+    int method_count;
+    kc_wvw_bridge_callback_t callback;
+    void *userdata;
+    int allow_file;
+    int allow_data;
+    int allow_localhost;
+} kc_wvw_bridge_options_t;
 
 /**
  * Returns the build version generated at compile time.
@@ -127,6 +147,22 @@ int kc_wvw_run(kc_wvw_t *ctx);
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 int kc_wvw_navigate(kc_wvw_t *ctx, const char *url);
+
+/**
+ * Enable one native bridge with a fixed method whitelist.
+ * @param ctx Window context.
+ * @param opts Bridge configuration options.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts);
+
+/**
+ * Deliver one native bridge event into the current WebView.
+ * @param ctx Window context.
+ * @param json JSON payload to dispatch as the event detail.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json);
 
 #ifdef __cplusplus
 }

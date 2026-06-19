@@ -91,6 +91,120 @@ kc_wvw_close(ctx);
 kc_wvw_options_free(&opts);
 ```
 
+## NativeBridge
+
+`wvw` can inject one native application bridge into trusted local content.
+
+JavaScript request surface:
+
+```js
+window.NativeBridge.MethodName(params, function (err, result) {
+    if (err) {
+        return;
+    }
+});
+```
+
+JavaScript event surface:
+
+```js
+window.addEventListener("nativebridge", function (e) {
+    const message = e.detail;
+});
+```
+
+Bridge rules:
+
+- `window.NativeBridge` is injected by native code.
+- Only whitelisted methods exist.
+- The bridge is disabled by default.
+- Remote navigation is blocked when the bridge is active.
+- `localhost` is denied unless the application enables it explicitly.
+
+### Bridge API
+
+```c
+typedef int (*kc_wvw_bridge_callback_t)(
+kc_wvw_t *ctx,
+const char *method,
+const char *params_json,
+char **result_json,
+void *userdata
+);
+
+typedef struct {
+    const char **methods;
+    int method_count;
+    kc_wvw_bridge_callback_t callback;
+    void *userdata;
+    int allow_file;
+    int allow_data;
+    int allow_localhost;
+} kc_wvw_bridge_options_t;
+
+int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts);
+int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json);
+```
+
+Callback contract:
+
+- `method` is one of the registered bridge methods.
+- `params_json` is the serialized JSON fragment received from JavaScript.
+- Return `KC_WVW_OK` for success.
+- Set `*result_json` to one serialized JSON value when needed.
+- Return `KC_WVW_ERROR` for failure.
+- On failure, `*result_json` may contain one serialized JSON error object.
+
+`kc_wvw_post_bridge_event()` sends one serialized JSON payload to the current page as the `nativebridge` event detail.
+
+### Example
+
+```c
+static int app_bridge(
+kc_wvw_t *ctx,
+const char *method,
+const char *params_json,
+char **result_json,
+void *userdata
+) {
+    (void)ctx;
+    (void)params_json;
+    (void)userdata;
+
+    if (strcmp(method, "GetVersion") == 0) {
+        *result_json = strdup("{\"version\":1}");
+        return KC_WVW_OK;
+    }
+
+    *result_json = strdup("{\"code\":\"UNKNOWN_METHOD\",\"message\":\"Bridge method is not implemented.\"}");
+    return KC_WVW_ERROR;
+}
+
+int main(void) {
+    kc_wvw_options_t opts;
+    kc_wvw_bridge_options_t bridge;
+    kc_wvw_t *ctx;
+    const char *methods[] = { "GetVersion" };
+
+    opts = kc_wvw_options_default();
+    opts.url = strdup("file:///tmp/app.html");
+    ctx = NULL;
+    kc_wvw_open(&ctx, &opts);
+
+    memset(&bridge, 0, sizeof(bridge));
+    bridge.methods = methods;
+    bridge.method_count = 1;
+    bridge.callback = app_bridge;
+    bridge.allow_file = 1;
+    kc_wvw_enable_bridge(ctx, &bridge);
+
+    kc_wvw_run(ctx);
+    kc_wvw_close(ctx);
+    kc_wvw_options_free(&opts);
+    return 0;
+}
+```
+
 ---
 
 ## Lifecycle
@@ -100,6 +214,8 @@ kc_wvw_options_free(&opts);
 - `kc_wvw_open()` creates the native window and embedded WebView.
 - `kc_wvw_run()` starts the native event loop.
 - `kc_wvw_navigate()` loads a new URL.
+- `kc_wvw_enable_bridge()` injects `window.NativeBridge` into trusted pages.
+- `kc_wvw_post_bridge_event()` emits one `nativebridge` event into the page.
 - `kc_wvw_close()` releases the window, WebView, and associated resources.
 
 Color input accepts `RRGGBB` and `AARRGGBB`. On Windows, alpha must be `00` or `FF` because WebView2 does not support semi-transparent startup colors.

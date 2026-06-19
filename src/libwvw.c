@@ -18,11 +18,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <string.h>
 #include <wchar.h>
 #include <windows.h>
 
 #define KC_WVW_CLOSE_MESSAGE (WM_APP + 1)
+#define KC_WVW_BRIDGE_MAX_MESSAGE 65536
 
 typedef HRESULT (STDAPICALLTYPE *kc_wvw_create_environment_fn)(PCWSTR, PCWSTR, ICoreWebView2EnvironmentOptions *, ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *);
 typedef HRESULT (STDAPICALLTYPE *kc_wvw_get_version_fn)(PCWSTR, LPWSTR *);
@@ -49,6 +51,16 @@ typedef struct {
     kc_wvw_signal_callback_t cb;
 } kc_wvw_signal_entry_t;
 
+typedef struct {
+    char **methods;
+    int method_count;
+    kc_wvw_bridge_callback_t callback;
+    void *userdata;
+    int allow_file;
+    int allow_data;
+    int allow_localhost;
+} kc_wvw_bridge_state_t;
+
 struct kc_wvw {
     kc_wvw_options_t opts;
     kc_wvw_signal_entry_t *signal_handlers;
@@ -66,7 +78,15 @@ struct kc_wvw {
     ICoreWebView2 *webview;
     kc_wvw_init_state_t init_state;
     char *pending_url;
+    kc_wvw_bridge_state_t bridge;
 };
+
+static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *url);
+static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge);
+static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src);
+static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge, const char *sender_expr, const char *receiver_setup);
+static int kc_wvw_bridge_post_json(kc_wvw_t *ctx, const char *json);
+static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json);
 
 static const kc_env_map_t env_config_table[] = {
     { "KC_WVW_URL", offsetof(kc_wvw_options_t, url), KC_ENV_TYPE_STR },
@@ -97,6 +117,23 @@ typedef struct kc_wvw_controller_handler {
     kc_wvw_t *ctx;
 } kc_wvw_controller_handler_t;
 
+typedef struct kc_wvw_script_handler {
+    ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler iface;
+    volatile LONG ref_count;
+} kc_wvw_script_handler_t;
+
+typedef struct kc_wvw_navigation_handler {
+    ICoreWebView2NavigationStartingEventHandler iface;
+    volatile LONG ref_count;
+    kc_wvw_t *ctx;
+} kc_wvw_navigation_handler_t;
+
+typedef struct kc_wvw_message_handler {
+    ICoreWebView2WebMessageReceivedEventHandler iface;
+    volatile LONG ref_count;
+    kc_wvw_t *ctx;
+} kc_wvw_message_handler_t;
+
 static HRESULT STDMETHODCALLTYPE kc_wvw_environment_query_interface(ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *iface, REFIID riid, void **object);
 static ULONG STDMETHODCALLTYPE kc_wvw_environment_add_ref(ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *iface);
 static ULONG STDMETHODCALLTYPE kc_wvw_environment_release(ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *iface);
@@ -105,6 +142,19 @@ static HRESULT STDMETHODCALLTYPE kc_wvw_controller_query_interface(ICoreWebView2
 static ULONG STDMETHODCALLTYPE kc_wvw_controller_add_ref(ICoreWebView2CreateCoreWebView2ControllerCompletedHandler *iface);
 static ULONG STDMETHODCALLTYPE kc_wvw_controller_release(ICoreWebView2CreateCoreWebView2ControllerCompletedHandler *iface);
 static HRESULT STDMETHODCALLTYPE kc_wvw_controller_invoke(ICoreWebView2CreateCoreWebView2ControllerCompletedHandler *iface, HRESULT error_code, ICoreWebView2Controller *result);
+static HRESULT STDMETHODCALLTYPE kc_wvw_script_query_interface(ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *iface, REFIID riid, void **object);
+static ULONG STDMETHODCALLTYPE kc_wvw_script_add_ref(ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *iface);
+static ULONG STDMETHODCALLTYPE kc_wvw_script_release(ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *iface);
+static HRESULT STDMETHODCALLTYPE kc_wvw_script_invoke(ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *iface, HRESULT error_code, PCWSTR result);
+static HRESULT STDMETHODCALLTYPE kc_wvw_navigation_query_interface(ICoreWebView2NavigationStartingEventHandler *iface, REFIID riid, void **object);
+static ULONG STDMETHODCALLTYPE kc_wvw_navigation_add_ref(ICoreWebView2NavigationStartingEventHandler *iface);
+static ULONG STDMETHODCALLTYPE kc_wvw_navigation_release(ICoreWebView2NavigationStartingEventHandler *iface);
+static HRESULT STDMETHODCALLTYPE kc_wvw_navigation_invoke(ICoreWebView2NavigationStartingEventHandler *iface, ICoreWebView2 *sender, ICoreWebView2NavigationStartingEventArgs *args);
+static HRESULT STDMETHODCALLTYPE kc_wvw_message_query_interface(ICoreWebView2WebMessageReceivedEventHandler *iface, REFIID riid, void **object);
+static ULONG STDMETHODCALLTYPE kc_wvw_message_add_ref(ICoreWebView2WebMessageReceivedEventHandler *iface);
+static ULONG STDMETHODCALLTYPE kc_wvw_message_release(ICoreWebView2WebMessageReceivedEventHandler *iface);
+static HRESULT STDMETHODCALLTYPE kc_wvw_message_invoke(ICoreWebView2WebMessageReceivedEventHandler *iface, ICoreWebView2 *sender, ICoreWebView2WebMessageReceivedEventArgs *args);
+static wchar_t *kc_wvw_utf16_from_utf8(const char *text);
 
 static ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandlerVtbl kc_wvw_environment_vtbl = {
     kc_wvw_environment_query_interface,
@@ -118,6 +168,27 @@ static ICoreWebView2CreateCoreWebView2ControllerCompletedHandlerVtbl kc_wvw_cont
     kc_wvw_controller_add_ref,
     kc_wvw_controller_release,
     kc_wvw_controller_invoke
+};
+
+static ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandlerVtbl kc_wvw_script_vtbl = {
+    kc_wvw_script_query_interface,
+    kc_wvw_script_add_ref,
+    kc_wvw_script_release,
+    kc_wvw_script_invoke
+};
+
+static ICoreWebView2NavigationStartingEventHandlerVtbl kc_wvw_navigation_vtbl = {
+    kc_wvw_navigation_query_interface,
+    kc_wvw_navigation_add_ref,
+    kc_wvw_navigation_release,
+    kc_wvw_navigation_invoke
+};
+
+static ICoreWebView2WebMessageReceivedEventHandlerVtbl kc_wvw_message_vtbl = {
+    kc_wvw_message_query_interface,
+    kc_wvw_message_add_ref,
+    kc_wvw_message_release,
+    kc_wvw_message_invoke
 };
 
 /**
@@ -164,6 +235,61 @@ static kc_wvw_controller_handler_t *kc_wvw_controller_handler_new(kc_wvw_t *ctx)
     }
 
     handler->iface.lpVtbl = &kc_wvw_controller_vtbl;
+    handler->ref_count = 1;
+    handler->ctx = ctx;
+    return handler;
+}
+
+/**
+ * Allocates one script completion handler.
+ * @return Newly allocated handler or NULL.
+ */
+static kc_wvw_script_handler_t *kc_wvw_script_handler_new(void) {
+    kc_wvw_script_handler_t *handler;
+
+    handler = (kc_wvw_script_handler_t *)calloc(1, sizeof(*handler));
+    if (!handler) {
+        return NULL;
+    }
+
+    handler->iface.lpVtbl = &kc_wvw_script_vtbl;
+    handler->ref_count = 1;
+    return handler;
+}
+
+/**
+ * Allocates one navigation event handler.
+ * @param ctx Window context.
+ * @return Newly allocated handler or NULL.
+ */
+static kc_wvw_navigation_handler_t *kc_wvw_navigation_handler_new(kc_wvw_t *ctx) {
+    kc_wvw_navigation_handler_t *handler;
+
+    handler = (kc_wvw_navigation_handler_t *)calloc(1, sizeof(*handler));
+    if (!handler) {
+        return NULL;
+    }
+
+    handler->iface.lpVtbl = &kc_wvw_navigation_vtbl;
+    handler->ref_count = 1;
+    handler->ctx = ctx;
+    return handler;
+}
+
+/**
+ * Allocates one web message event handler.
+ * @param ctx Window context.
+ * @return Newly allocated handler or NULL.
+ */
+static kc_wvw_message_handler_t *kc_wvw_message_handler_new(kc_wvw_t *ctx) {
+    kc_wvw_message_handler_t *handler;
+
+    handler = (kc_wvw_message_handler_t *)calloc(1, sizeof(*handler));
+    if (!handler) {
+        return NULL;
+    }
+
+    handler->iface.lpVtbl = &kc_wvw_message_vtbl;
     handler->ref_count = 1;
     handler->ctx = ctx;
     return handler;
@@ -268,6 +394,167 @@ static ULONG STDMETHODCALLTYPE kc_wvw_controller_release(ICoreWebView2CreateCore
 }
 
 /**
+ * Returns a requested interface from the script handler.
+ * @param iface COM handler interface.
+ * @param riid Requested interface identifier.
+ * @param object Destination pointer.
+ * @return HRESULT success code.
+ */
+static HRESULT STDMETHODCALLTYPE kc_wvw_script_query_interface(ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *iface, REFIID riid, void **object) {
+    if (!object) {
+        return E_POINTER;
+    }
+
+    *object = NULL;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler)) {
+        *object = iface;
+        kc_wvw_script_add_ref(iface);
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+/**
+ * Increments the script handler reference count.
+ * @param iface COM handler interface.
+ * @return New reference count.
+ */
+static ULONG STDMETHODCALLTYPE kc_wvw_script_add_ref(ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *iface) {
+    kc_wvw_script_handler_t *handler = (kc_wvw_script_handler_t *)iface;
+
+    return (ULONG)InterlockedIncrement(&handler->ref_count);
+}
+
+/**
+ * Decrements the script handler reference count.
+ * @param iface COM handler interface.
+ * @return New reference count.
+ */
+static ULONG STDMETHODCALLTYPE kc_wvw_script_release(ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *iface) {
+    kc_wvw_script_handler_t *handler = (kc_wvw_script_handler_t *)iface;
+    ULONG next;
+
+    next = (ULONG)InterlockedDecrement(&handler->ref_count);
+    if (next == 0) {
+        free(handler);
+    }
+    return next;
+}
+
+/**
+ * Completes one injected startup script registration.
+ * @param iface COM handler interface.
+ * @param error_code Completion status.
+ * @param result Script identifier.
+ * @return HRESULT success code.
+ */
+static HRESULT STDMETHODCALLTYPE kc_wvw_script_invoke(ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *iface, HRESULT error_code, PCWSTR result) {
+    (void)iface;
+    (void)error_code;
+    (void)result;
+    return S_OK;
+}
+
+/**
+ * Returns a requested interface from the navigation handler.
+ * @param iface COM handler interface.
+ * @param riid Requested interface identifier.
+ * @param object Destination pointer.
+ * @return HRESULT success code.
+ */
+static HRESULT STDMETHODCALLTYPE kc_wvw_navigation_query_interface(ICoreWebView2NavigationStartingEventHandler *iface, REFIID riid, void **object) {
+    if (!object) {
+        return E_POINTER;
+    }
+
+    *object = NULL;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_ICoreWebView2NavigationStartingEventHandler)) {
+        *object = iface;
+        kc_wvw_navigation_add_ref(iface);
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+/**
+ * Increments the navigation handler reference count.
+ * @param iface COM handler interface.
+ * @return New reference count.
+ */
+static ULONG STDMETHODCALLTYPE kc_wvw_navigation_add_ref(ICoreWebView2NavigationStartingEventHandler *iface) {
+    kc_wvw_navigation_handler_t *handler = (kc_wvw_navigation_handler_t *)iface;
+
+    return (ULONG)InterlockedIncrement(&handler->ref_count);
+}
+
+/**
+ * Decrements the navigation handler reference count.
+ * @param iface COM handler interface.
+ * @return New reference count.
+ */
+static ULONG STDMETHODCALLTYPE kc_wvw_navigation_release(ICoreWebView2NavigationStartingEventHandler *iface) {
+    kc_wvw_navigation_handler_t *handler = (kc_wvw_navigation_handler_t *)iface;
+    ULONG next;
+
+    next = (ULONG)InterlockedDecrement(&handler->ref_count);
+    if (next == 0) {
+        free(handler);
+    }
+    return next;
+}
+
+/**
+ * Returns a requested interface from the message handler.
+ * @param iface COM handler interface.
+ * @param riid Requested interface identifier.
+ * @param object Destination pointer.
+ * @return HRESULT success code.
+ */
+static HRESULT STDMETHODCALLTYPE kc_wvw_message_query_interface(ICoreWebView2WebMessageReceivedEventHandler *iface, REFIID riid, void **object) {
+    if (!object) {
+        return E_POINTER;
+    }
+
+    *object = NULL;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_ICoreWebView2WebMessageReceivedEventHandler)) {
+        *object = iface;
+        kc_wvw_message_add_ref(iface);
+        return S_OK;
+    }
+
+    return E_NOINTERFACE;
+}
+
+/**
+ * Increments the message handler reference count.
+ * @param iface COM handler interface.
+ * @return New reference count.
+ */
+static ULONG STDMETHODCALLTYPE kc_wvw_message_add_ref(ICoreWebView2WebMessageReceivedEventHandler *iface) {
+    kc_wvw_message_handler_t *handler = (kc_wvw_message_handler_t *)iface;
+
+    return (ULONG)InterlockedIncrement(&handler->ref_count);
+}
+
+/**
+ * Decrements the message handler reference count.
+ * @param iface COM handler interface.
+ * @return New reference count.
+ */
+static ULONG STDMETHODCALLTYPE kc_wvw_message_release(ICoreWebView2WebMessageReceivedEventHandler *iface) {
+    kc_wvw_message_handler_t *handler = (kc_wvw_message_handler_t *)iface;
+    ULONG next;
+
+    next = (ULONG)InterlockedDecrement(&handler->ref_count);
+    if (next == 0) {
+        free(handler);
+    }
+    return next;
+}
+
+/**
  * Returns the browser arguments for the WebView2 environment.
  * @return Argument string or NULL.
  */
@@ -304,6 +591,542 @@ static char *kc_wvw_strdup(const char *text) {
 
     memcpy(copy, text, length + 1);
     return copy;
+}
+
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} kc_wvw_text_buf_t;
+
+/**
+ * Initialize one text buffer.
+ * @param buf Buffer state.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_text_buf_init(kc_wvw_text_buf_t *buf) {
+    if (!buf) {
+        return KC_WVW_ERROR;
+    }
+
+    buf->data = (char *)malloc(256);
+    if (!buf->data) {
+        return KC_WVW_ERROR;
+    }
+
+    buf->data[0] = '\0';
+    buf->len = 0;
+    buf->cap = 256;
+    return KC_WVW_OK;
+}
+
+/**
+ * Append one byte range into the text buffer.
+ * @param buf Buffer state.
+ * @param text Source byte range.
+ * @param len Source length.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_text_buf_append_n(kc_wvw_text_buf_t *buf, const char *text, size_t len) {
+    char *next;
+    size_t cap;
+
+    if (!buf || !buf->data || (!text && len != 0)) {
+        return KC_WVW_ERROR;
+    }
+
+    if (buf->len + len + 1 > buf->cap) {
+        cap = buf->cap;
+        while (buf->len + len + 1 > cap) {
+            cap *= 2;
+        }
+        next = (char *)realloc(buf->data, cap);
+        if (!next) {
+            return KC_WVW_ERROR;
+        }
+        buf->data = next;
+        buf->cap = cap;
+    }
+
+    if (len > 0) {
+        memcpy(buf->data + buf->len, text, len);
+        buf->len += len;
+    }
+    buf->data[buf->len] = '\0';
+    return KC_WVW_OK;
+}
+
+/**
+ * Append one C string into the text buffer.
+ * @param buf Buffer state.
+ * @param text Source text.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_text_buf_append(kc_wvw_text_buf_t *buf, const char *text) {
+    if (!text) {
+        return KC_WVW_ERROR;
+    }
+
+    return kc_wvw_text_buf_append_n(buf, text, strlen(text));
+}
+
+/**
+ * Duplicate one byte range into a C string.
+ * @param start Start of the range.
+ * @param len Range length.
+ * @return Newly allocated string or NULL.
+ */
+static char *kc_wvw_strndup_range(const char *start, size_t len) {
+    char *copy;
+
+    if (!start) {
+        return NULL;
+    }
+
+    copy = (char *)malloc(len + 1);
+    if (!copy) {
+        return NULL;
+    }
+
+    memcpy(copy, start, len);
+    copy[len] = '\0';
+    return copy;
+}
+
+/**
+ * Return whether one bridge method name is safe for JS property injection.
+ * @param method Candidate method name.
+ * @return Non-zero when the identifier is accepted, otherwise zero.
+ */
+static int kc_wvw_bridge_method_valid(const char *method) {
+    size_t i;
+
+    if (!method || !method[0]) {
+        return 0;
+    }
+
+    if (!((method[0] >= 'A' && method[0] <= 'Z') || (method[0] >= 'a' && method[0] <= 'z') || method[0] == '_' || method[0] == '$')) {
+        return 0;
+    }
+
+    for (i = 1; method[i]; i++) {
+        if (!((method[i] >= 'A' && method[i] <= 'Z') || (method[i] >= 'a' && method[i] <= 'z') || (method[i] >= '0' && method[i] <= '9') || method[i] == '_' || method[i] == '$')) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+/**
+ * Return whether one URL is trusted for the current bridge policy.
+ * @param bridge Bridge state.
+ * @param url Candidate URL.
+ * @return Non-zero when the URL is accepted, otherwise zero.
+ */
+static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *url) {
+    if (!bridge || !bridge->callback || !url) {
+        return 0;
+    }
+
+    if (bridge->allow_file && strncmp(url, "file://", 7) == 0) {
+        return 1;
+    }
+    if (bridge->allow_data && strncmp(url, "data:", 5) == 0) {
+        return 1;
+    }
+    if (bridge->allow_localhost && (strncmp(url, "http://localhost", 16) == 0 || strncmp(url, "https://localhost", 17) == 0)) {
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
+ * Release one copied bridge configuration.
+ * @param bridge Bridge state.
+ * @return None.
+ */
+static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
+    int i;
+
+    if (!bridge) {
+        return;
+    }
+
+    if (bridge->methods) {
+        for (i = 0; i < bridge->method_count; i++) {
+            free(bridge->methods[i]);
+        }
+        free(bridge->methods);
+    }
+
+    memset(bridge, 0, sizeof(*bridge));
+}
+
+/**
+ * Copy one bridge configuration into the context state.
+ * @param dst Destination bridge state.
+ * @param src Source bridge options.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src) {
+    int i;
+
+    if (!dst || !src || !src->methods || src->method_count <= 0 || !src->callback) {
+        return KC_WVW_ERROR;
+    }
+
+    dst->methods = (char **)calloc((size_t)src->method_count, sizeof(char *));
+    if (!dst->methods) {
+        return KC_WVW_ERROR;
+    }
+
+    dst->method_count = src->method_count;
+    for (i = 0; i < src->method_count; i++) {
+        if (!kc_wvw_bridge_method_valid(src->methods[i])) {
+            kc_wvw_bridge_state_free(dst);
+            return KC_WVW_ERROR;
+        }
+        dst->methods[i] = kc_wvw_strdup(src->methods[i]);
+        if (!dst->methods[i]) {
+            kc_wvw_bridge_state_free(dst);
+            return KC_WVW_ERROR;
+        }
+    }
+
+    dst->callback = src->callback;
+    dst->userdata = src->userdata;
+    dst->allow_file = src->allow_file;
+    dst->allow_data = src->allow_data;
+    dst->allow_localhost = src->allow_localhost;
+    return KC_WVW_OK;
+}
+
+/**
+ * Return whether one method belongs to the current whitelist.
+ * @param bridge Bridge state.
+ * @param method Candidate method name.
+ * @return Non-zero when the method is accepted, otherwise zero.
+ */
+static int kc_wvw_bridge_method_allowed(kc_wvw_bridge_state_t *bridge, const char *method) {
+    int i;
+
+    if (!bridge || !method) {
+        return 0;
+    }
+
+    for (i = 0; i < bridge->method_count; i++) {
+        if (strcmp(bridge->methods[i], method) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * Extract one string field from a bridge request.
+ * @param json Source JSON payload.
+ * @param key Field name.
+ * @return Newly allocated string value or NULL.
+ */
+static char *kc_wvw_bridge_get_string(const char *json, const char *key) {
+    char pattern[64];
+    const char *start;
+    const char *end;
+
+    if (!json || !key) {
+        return NULL;
+    }
+
+    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
+    start = strstr(json, pattern);
+    if (!start) {
+        return NULL;
+    }
+
+    start += strlen(pattern);
+    end = strchr(start, '"');
+    if (!end) {
+        return NULL;
+    }
+
+    return kc_wvw_strndup_range(start, (size_t)(end - start));
+}
+
+/**
+ * Extract the params payload from one bridge request.
+ * @param json Source JSON payload.
+ * @return Newly allocated JSON fragment or NULL.
+ */
+static char *kc_wvw_bridge_get_params(const char *json) {
+    const char *start;
+    const char *end;
+
+    if (!json) {
+        return NULL;
+    }
+
+    start = strstr(json, "\"params\":");
+    if (!start) {
+        return kc_wvw_strdup("null");
+    }
+
+    start += 9;
+    end = strrchr(start, '}');
+    if (!end) {
+        return NULL;
+    }
+
+    return kc_wvw_strndup_range(start, (size_t)(end - start));
+}
+
+/**
+ * Build one bridge response payload.
+ * @param id Request identifier.
+ * @param ok Success flag.
+ * @param body Serialized result or error object.
+ * @return Newly allocated response payload or NULL.
+ */
+static char *kc_wvw_bridge_wrap_response(const char *id, int ok, const char *body) {
+    kc_wvw_text_buf_t buf;
+
+    if (!id || !body || kc_wvw_text_buf_init(&buf) != KC_WVW_OK) {
+        return NULL;
+    }
+
+    if (kc_wvw_text_buf_append(&buf, "{\"id\":\"") != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, id) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, ok ? "\",\"ok\":true,\"result\":" : "\",\"ok\":false,\"error\":") != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, body) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, "}") != KC_WVW_OK) {
+        free(buf.data);
+        return NULL;
+    }
+
+    return buf.data;
+}
+
+/**
+ * Build one JSON error object.
+ * @param code Error code string.
+ * @param message Error message string.
+ * @return Newly allocated JSON error object or NULL.
+ */
+static char *kc_wvw_bridge_error_object(const char *code, const char *message) {
+    kc_wvw_text_buf_t buf;
+
+    if (!code || !message || kc_wvw_text_buf_init(&buf) != KC_WVW_OK) {
+        return NULL;
+    }
+
+    if (kc_wvw_text_buf_append(&buf, "{\"code\":\"") != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, code) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, "\",\"message\":\"") != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, message) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, "\"}") != KC_WVW_OK) {
+        free(buf.data);
+        return NULL;
+    }
+
+    return buf.data;
+}
+
+/**
+ * Build the injected NativeBridge bootstrap script.
+ * @param bridge Bridge state.
+ * @param sender_expr JavaScript sender expression.
+ * @param receiver_setup JavaScript receiver setup.
+ * @return Newly allocated script text or NULL.
+ */
+static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge, const char *sender_expr, const char *receiver_setup) {
+    kc_wvw_text_buf_t buf;
+    int i;
+
+    if (!bridge || !sender_expr || !receiver_setup || kc_wvw_text_buf_init(&buf) != KC_WVW_OK) {
+        return NULL;
+    }
+
+    if (kc_wvw_text_buf_append(&buf, "(function(){if(window.NativeBridge){return;}var __kcWvwPending={};var __kcWvwSeq=0;function __kcWvwReceive(msg){if(msg&&typeof msg.id==='string'){var cb=__kcWvwPending[msg.id];if(cb){delete __kcWvwPending[msg.id];cb(msg.ok?null:(msg.error||{code:'ERROR',message:'Bridge error'}),msg.ok?msg.result:null);}return;}window.dispatchEvent(new CustomEvent('") != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, KC_WVW_BRIDGE_EVENT_NAME) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, "',{detail:msg}));}window.__kcWvwReceive=__kcWvwReceive;window.NativeBridge={};function __kcWvwSend(method,params,callback){var id=String(++__kcWvwSeq);if(typeof callback==='function'){__kcWvwPending[id]=callback;}(") != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, sender_expr) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, ")(JSON.stringify({id:id,method:method,params:params===undefined?null:params}));}") != KC_WVW_OK) {
+        free(buf.data);
+        return NULL;
+    }
+
+    for (i = 0; i < bridge->method_count; i++) {
+        if (kc_wvw_text_buf_append(&buf, "window.NativeBridge.") != KC_WVW_OK ||
+            kc_wvw_text_buf_append(&buf, bridge->methods[i]) != KC_WVW_OK ||
+            kc_wvw_text_buf_append(&buf, "=function(params,callback){return __kcWvwSend('") != KC_WVW_OK ||
+            kc_wvw_text_buf_append(&buf, bridge->methods[i]) != KC_WVW_OK ||
+            kc_wvw_text_buf_append(&buf, "',params,callback);};") != KC_WVW_OK) {
+            free(buf.data);
+            return NULL;
+        }
+    }
+
+    if (kc_wvw_text_buf_append(&buf, receiver_setup) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, "}());") != KC_WVW_OK) {
+        free(buf.data);
+        return NULL;
+    }
+
+    return buf.data;
+}
+
+/**
+ * Deliver one JSON payload into the WebView bridge runtime.
+ * @param ctx Window context.
+ * @param json JSON payload.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_bridge_post_json(kc_wvw_t *ctx, const char *json) {
+    wchar_t *wide;
+    HRESULT hr;
+
+    if (!ctx || !ctx->webview || !json || strlen(json) > KC_WVW_BRIDGE_MAX_MESSAGE) {
+        return KC_WVW_ERROR;
+    }
+
+    wide = kc_wvw_utf16_from_utf8(json);
+    if (!wide) {
+        return KC_WVW_ERROR;
+    }
+
+    hr = ICoreWebView2_PostWebMessageAsJson(ctx->webview, wide);
+    free(wide);
+    return FAILED(hr) ? KC_WVW_ERROR : KC_WVW_OK;
+}
+
+/**
+ * Dispatch one bridge request into the application callback.
+ * @param ctx Window context.
+ * @param json Request payload.
+ * @return Newly allocated response payload or NULL.
+ */
+static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
+    char *id;
+    char *method;
+    char *params;
+    char *result;
+    char *error;
+    char *response;
+    int rc;
+
+    if (!ctx || !json || strlen(json) > KC_WVW_BRIDGE_MAX_MESSAGE) {
+        error = kc_wvw_bridge_error_object("BAD_REQUEST", "Bridge request is invalid.");
+        response = error ? kc_wvw_bridge_wrap_response("0", 0, error) : NULL;
+        free(error);
+        return response;
+    }
+
+    id = kc_wvw_bridge_get_string(json, "id");
+    method = kc_wvw_bridge_get_string(json, "method");
+    params = kc_wvw_bridge_get_params(json);
+    if (!id || !method || !params) {
+        free(id);
+        free(method);
+        free(params);
+        error = kc_wvw_bridge_error_object("BAD_REQUEST", "Bridge request is malformed.");
+        response = error ? kc_wvw_bridge_wrap_response("0", 0, error) : NULL;
+        free(error);
+        return response;
+    }
+
+    if (!kc_wvw_bridge_method_allowed(&ctx->bridge, method)) {
+        error = kc_wvw_bridge_error_object("METHOD_NOT_ALLOWED", "Bridge method is not allowed.");
+        response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+        free(id);
+        free(method);
+        free(params);
+        free(error);
+        return response;
+    }
+
+    result = NULL;
+    rc = ctx->bridge.callback(ctx, method, params, &result, ctx->bridge.userdata);
+    if (rc == KC_WVW_OK) {
+        if (!result) {
+            result = kc_wvw_strdup("null");
+        }
+        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+    } else {
+        if (!result) {
+            result = kc_wvw_bridge_error_object("CALL_FAILED", "Bridge callback failed.");
+        }
+        response = result ? kc_wvw_bridge_wrap_response(id, 0, result) : NULL;
+    }
+
+    free(id);
+    free(method);
+    free(params);
+    free(result);
+    return response;
+}
+
+/**
+ * Decide whether one navigation request stays inside the trusted WebView.
+ * @param iface COM handler interface.
+ * @param sender WebView sender.
+ * @param args Navigation event args.
+ * @return HRESULT success code.
+ */
+static HRESULT STDMETHODCALLTYPE kc_wvw_navigation_invoke(ICoreWebView2NavigationStartingEventHandler *iface, ICoreWebView2 *sender, ICoreWebView2NavigationStartingEventArgs *args) {
+    kc_wvw_navigation_handler_t *handler = (kc_wvw_navigation_handler_t *)iface;
+    LPWSTR uri = NULL;
+    char utf8[4096];
+
+    (void)sender;
+    if (!handler || !handler->ctx || !handler->ctx->bridge.callback || !args) {
+        return S_OK;
+    }
+
+    if (SUCCEEDED(ICoreWebView2NavigationStartingEventArgs_get_Uri(args, &uri)) && uri) {
+        utf8[0] = '\0';
+        WideCharToMultiByte(CP_UTF8, 0, uri, -1, utf8, sizeof(utf8), NULL, NULL);
+        if (!kc_wvw_bridge_url_trusted(&handler->ctx->bridge, utf8)) {
+            ICoreWebView2NavigationStartingEventArgs_put_Cancel(args, TRUE);
+        }
+        CoTaskMemFree(uri);
+    }
+
+    return S_OK;
+}
+
+/**
+ * Dispatch one WebView message into the current bridge callback.
+ * @param iface COM handler interface.
+ * @param sender WebView sender.
+ * @param args Message event args.
+ * @return HRESULT success code.
+ */
+static HRESULT STDMETHODCALLTYPE kc_wvw_message_invoke(ICoreWebView2WebMessageReceivedEventHandler *iface, ICoreWebView2 *sender, ICoreWebView2WebMessageReceivedEventArgs *args) {
+    kc_wvw_message_handler_t *handler = (kc_wvw_message_handler_t *)iface;
+    LPWSTR message = NULL;
+    char utf8[KC_WVW_BRIDGE_MAX_MESSAGE + 1];
+    char *response;
+
+    (void)sender;
+    if (!handler || !handler->ctx || !args) {
+        return S_OK;
+    }
+
+    if (FAILED(ICoreWebView2WebMessageReceivedEventArgs_TryGetWebMessageAsString(args, &message)) || !message) {
+        return S_OK;
+    }
+
+    utf8[0] = '\0';
+    WideCharToMultiByte(CP_UTF8, 0, message, -1, utf8, sizeof(utf8), NULL, NULL);
+    response = kc_wvw_bridge_dispatch_request(handler->ctx, utf8);
+    if (response) {
+        kc_wvw_bridge_post_json(handler->ctx, response);
+        free(response);
+    }
+    CoTaskMemFree(message);
+    return S_OK;
 }
 
 /**
@@ -621,6 +1444,71 @@ static int kc_wvw_apply_background_color(kc_wvw_t *ctx) {
     hr = ICoreWebView2Controller2_put_DefaultBackgroundColor(controller2, color);
     ICoreWebView2Controller2_Release(controller2);
     return FAILED(hr) ? KC_WVW_ERROR : KC_WVW_OK;
+}
+
+/**
+ * Install the configured bridge into the current WebView.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_windows_install_bridge(kc_wvw_t *ctx) {
+    kc_wvw_script_handler_t *script_handler;
+    kc_wvw_navigation_handler_t *navigation_handler;
+    kc_wvw_message_handler_t *message_handler;
+    EventRegistrationToken token;
+    wchar_t *script_wide;
+    char *script;
+    HRESULT hr;
+
+    if (!ctx || !ctx->webview || !ctx->bridge.callback) {
+        return KC_WVW_OK;
+    }
+
+    script = kc_wvw_bridge_bootstrap_script(&ctx->bridge, "window.chrome.webview.postMessage", "window.chrome.webview.addEventListener('message',function(e){__kcWvwReceive(e.data);});");
+    if (!script) {
+        return KC_WVW_ERROR;
+    }
+
+    script_wide = kc_wvw_utf16_from_utf8(script);
+    free(script);
+    if (!script_wide) {
+        return KC_WVW_ERROR;
+    }
+
+    script_handler = kc_wvw_script_handler_new();
+    if (!script_handler) {
+        free(script_wide);
+        return KC_WVW_ERROR;
+    }
+
+    hr = ICoreWebView2_AddScriptToExecuteOnDocumentCreated(ctx->webview, script_wide, (ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *)script_handler);
+    ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler_Release((ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler *)script_handler);
+    free(script_wide);
+    if (FAILED(hr)) {
+        return KC_WVW_ERROR;
+    }
+
+    navigation_handler = kc_wvw_navigation_handler_new(ctx);
+    if (!navigation_handler) {
+        return KC_WVW_ERROR;
+    }
+    hr = ICoreWebView2_add_NavigationStarting(ctx->webview, (ICoreWebView2NavigationStartingEventHandler *)navigation_handler, &token);
+    ICoreWebView2NavigationStartingEventHandler_Release((ICoreWebView2NavigationStartingEventHandler *)navigation_handler);
+    if (FAILED(hr)) {
+        return KC_WVW_ERROR;
+    }
+
+    message_handler = kc_wvw_message_handler_new(ctx);
+    if (!message_handler) {
+        return KC_WVW_ERROR;
+    }
+    hr = ICoreWebView2_add_WebMessageReceived(ctx->webview, (ICoreWebView2WebMessageReceivedEventHandler *)message_handler, &token);
+    ICoreWebView2WebMessageReceivedEventHandler_Release((ICoreWebView2WebMessageReceivedEventHandler *)message_handler);
+    if (FAILED(hr)) {
+        return KC_WVW_ERROR;
+    }
+
+    return KC_WVW_OK;
 }
 
 /**
@@ -942,6 +1830,10 @@ static HRESULT STDMETHODCALLTYPE kc_wvw_controller_invoke(ICoreWebView2CreateCor
         return S_OK;
     }
     kc_wvw_apply_settings(ctx);
+    if (kc_wvw_windows_install_bridge(ctx) != KC_WVW_OK) {
+        ctx->init_state = KC_WVW_INIT_FAILED;
+        return S_OK;
+    }
     if (kc_wvw_flush_pending_navigation(ctx) != KC_WVW_OK) {
         ctx->init_state = KC_WVW_INIT_FAILED;
         return S_OK;
@@ -1217,6 +2109,7 @@ int kc_wvw_close(kc_wvw_t *ctx) {
 
     free(ctx->pending_url);
     free(ctx->signal_handlers);
+    kc_wvw_bridge_state_free(&ctx->bridge);
     kc_wvw_options_free(&ctx->opts);
     if (ctx->com_initialized) {
         CoUninitialize();
@@ -1268,6 +2161,9 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
     if (!ctx || !url) {
         return KC_WVW_ERROR;
     }
+    if (ctx->bridge.callback && !kc_wvw_bridge_url_trusted(&ctx->bridge, url)) {
+        return KC_WVW_ERROR;
+    }
 
     next_url = kc_wvw_strdup(url);
     if (!next_url) {
@@ -1290,6 +2186,49 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
     return FAILED(hr) ? KC_WVW_ERROR : KC_WVW_OK;
 }
 
+/**
+ * Enable one native bridge with a fixed method whitelist.
+ * @param ctx Window context.
+ * @param opts Bridge configuration options.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
+    kc_wvw_bridge_state_t bridge;
+
+    if (!ctx || !opts) {
+        return KC_WVW_ERROR;
+    }
+
+    memset(&bridge, 0, sizeof(bridge));
+    if (kc_wvw_bridge_state_copy(&bridge, opts) != KC_WVW_OK) {
+        return KC_WVW_ERROR;
+    }
+    if (!kc_wvw_bridge_url_trusted(&bridge, ctx->pending_url ? ctx->pending_url : ctx->opts.url)) {
+        kc_wvw_bridge_state_free(&bridge);
+        return KC_WVW_ERROR;
+    }
+
+    kc_wvw_bridge_state_free(&ctx->bridge);
+    ctx->bridge = bridge;
+    if (ctx->webview) {
+        if (kc_wvw_windows_install_bridge(ctx) != KC_WVW_OK) {
+            kc_wvw_bridge_state_free(&ctx->bridge);
+            return KC_WVW_ERROR;
+        }
+    }
+    return KC_WVW_OK;
+}
+
+/**
+ * Deliver one native bridge event into the current WebView.
+ * @param ctx Window context.
+ * @param json JSON payload to dispatch as the event detail.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json) {
+    return kc_wvw_bridge_post_json(ctx, json);
+}
+
 #else
 
 #define _POSIX_C_SOURCE 200809L
@@ -1305,6 +2244,8 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
 #include <stdlib.h>
 #include <string.h>
 #include <webkit2/webkit2.h>
+
+#define KC_WVW_BRIDGE_MAX_MESSAGE 65536
 
 typedef enum {
     KC_ENV_TYPE_INT,
@@ -1322,6 +2263,16 @@ typedef struct {
     kc_wvw_signal_callback_t cb;
 } kc_wvw_signal_entry_t;
 
+typedef struct {
+    char **methods;
+    int method_count;
+    kc_wvw_bridge_callback_t callback;
+    void *userdata;
+    int allow_file;
+    int allow_data;
+    int allow_localhost;
+} kc_wvw_bridge_state_t;
+
 struct kc_wvw {
     kc_wvw_options_t opts;
     kc_wvw_signal_entry_t *signal_handlers;
@@ -1330,7 +2281,15 @@ struct kc_wvw {
     int running;
     GtkWidget *window;
     WebKitWebView *web_view;
+    kc_wvw_bridge_state_t bridge;
 };
+
+static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *url);
+static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge);
+static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src);
+static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge);
+static int kc_wvw_bridge_post_json(kc_wvw_t *ctx, const char *json);
+static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json);
 
 static const kc_env_map_t env_config_table[] = {
     { "KC_WVW_URL", offsetof(kc_wvw_options_t, url), KC_ENV_TYPE_STR },
@@ -1378,6 +2337,528 @@ static char *kc_wvw_strdup(const char *text) {
 
     memcpy(copy, text, length + 1);
     return copy;
+}
+
+typedef struct {
+    char *data;
+    size_t len;
+    size_t cap;
+} kc_wvw_text_buf_t;
+
+/**
+ * Initialize one text buffer.
+ * @param buf Buffer state.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_text_buf_init(kc_wvw_text_buf_t *buf) {
+    if (!buf) {
+        return KC_WVW_ERROR;
+    }
+
+    buf->data = (char *)malloc(256);
+    if (!buf->data) {
+        return KC_WVW_ERROR;
+    }
+
+    buf->data[0] = '\0';
+    buf->len = 0;
+    buf->cap = 256;
+    return KC_WVW_OK;
+}
+
+/**
+ * Append one byte range into the text buffer.
+ * @param buf Buffer state.
+ * @param text Source byte range.
+ * @param len Source length.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_text_buf_append_n(kc_wvw_text_buf_t *buf, const char *text, size_t len) {
+    char *next;
+    size_t cap;
+
+    if (!buf || !buf->data || (!text && len != 0)) {
+        return KC_WVW_ERROR;
+    }
+
+    if (buf->len + len + 1 > buf->cap) {
+        cap = buf->cap;
+        while (buf->len + len + 1 > cap) {
+            cap *= 2;
+        }
+        next = (char *)realloc(buf->data, cap);
+        if (!next) {
+            return KC_WVW_ERROR;
+        }
+        buf->data = next;
+        buf->cap = cap;
+    }
+
+    if (len > 0) {
+        memcpy(buf->data + buf->len, text, len);
+        buf->len += len;
+    }
+    buf->data[buf->len] = '\0';
+    return KC_WVW_OK;
+}
+
+/**
+ * Append one C string into the text buffer.
+ * @param buf Buffer state.
+ * @param text Source text.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_text_buf_append(kc_wvw_text_buf_t *buf, const char *text) {
+    if (!text) {
+        return KC_WVW_ERROR;
+    }
+
+    return kc_wvw_text_buf_append_n(buf, text, strlen(text));
+}
+
+/**
+ * Duplicate one byte range into a C string.
+ * @param start Start of the range.
+ * @param len Range length.
+ * @return Newly allocated string or NULL.
+ */
+static char *kc_wvw_strndup_range(const char *start, size_t len) {
+    char *copy;
+
+    if (!start) {
+        return NULL;
+    }
+
+    copy = (char *)malloc(len + 1);
+    if (!copy) {
+        return NULL;
+    }
+
+    memcpy(copy, start, len);
+    copy[len] = '\0';
+    return copy;
+}
+
+/**
+ * Return whether one bridge method name is safe for JS property injection.
+ * @param method Candidate method name.
+ * @return Non-zero when the identifier is accepted, otherwise zero.
+ */
+static int kc_wvw_bridge_method_valid(const char *method) {
+    size_t i;
+
+    if (!method || !method[0]) {
+        return 0;
+    }
+
+    if (!((method[0] >= 'A' && method[0] <= 'Z') || (method[0] >= 'a' && method[0] <= 'z') || method[0] == '_' || method[0] == '$')) {
+        return 0;
+    }
+
+    for (i = 1; method[i]; i++) {
+        if (!((method[i] >= 'A' && method[i] <= 'Z') || (method[i] >= 'a' && method[i] <= 'z') || (method[i] >= '0' && method[i] <= '9') || method[i] == '_' || method[i] == '$')) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+/**
+ * Return whether one URL is trusted for the current bridge policy.
+ * @param bridge Bridge state.
+ * @param url Candidate URL.
+ * @return Non-zero when the URL is accepted, otherwise zero.
+ */
+static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *url) {
+    if (!bridge || !bridge->callback || !url) {
+        return 0;
+    }
+
+    if (bridge->allow_file && strncmp(url, "file://", 7) == 0) {
+        return 1;
+    }
+    if (bridge->allow_data && strncmp(url, "data:", 5) == 0) {
+        return 1;
+    }
+    if (bridge->allow_localhost && (strncmp(url, "http://localhost", 16) == 0 || strncmp(url, "https://localhost", 17) == 0)) {
+        return 1;
+    }
+
+    return 0;
+}
+
+/**
+ * Release one copied bridge configuration.
+ * @param bridge Bridge state.
+ * @return None.
+ */
+static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
+    int i;
+
+    if (!bridge) {
+        return;
+    }
+
+    if (bridge->methods) {
+        for (i = 0; i < bridge->method_count; i++) {
+            free(bridge->methods[i]);
+        }
+        free(bridge->methods);
+    }
+
+    memset(bridge, 0, sizeof(*bridge));
+}
+
+/**
+ * Copy one bridge configuration into the context state.
+ * @param dst Destination bridge state.
+ * @param src Source bridge options.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src) {
+    int i;
+
+    if (!dst || !src || !src->methods || src->method_count <= 0 || !src->callback) {
+        return KC_WVW_ERROR;
+    }
+
+    dst->methods = (char **)calloc((size_t)src->method_count, sizeof(char *));
+    if (!dst->methods) {
+        return KC_WVW_ERROR;
+    }
+
+    dst->method_count = src->method_count;
+    for (i = 0; i < src->method_count; i++) {
+        if (!kc_wvw_bridge_method_valid(src->methods[i])) {
+            kc_wvw_bridge_state_free(dst);
+            return KC_WVW_ERROR;
+        }
+        dst->methods[i] = kc_wvw_strdup(src->methods[i]);
+        if (!dst->methods[i]) {
+            kc_wvw_bridge_state_free(dst);
+            return KC_WVW_ERROR;
+        }
+    }
+
+    dst->callback = src->callback;
+    dst->userdata = src->userdata;
+    dst->allow_file = src->allow_file;
+    dst->allow_data = src->allow_data;
+    dst->allow_localhost = src->allow_localhost;
+    return KC_WVW_OK;
+}
+
+/**
+ * Return whether one method belongs to the current whitelist.
+ * @param bridge Bridge state.
+ * @param method Candidate method name.
+ * @return Non-zero when the method is accepted, otherwise zero.
+ */
+static int kc_wvw_bridge_method_allowed(kc_wvw_bridge_state_t *bridge, const char *method) {
+    int i;
+
+    if (!bridge || !method) {
+        return 0;
+    }
+
+    for (i = 0; i < bridge->method_count; i++) {
+        if (strcmp(bridge->methods[i], method) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * Extract one string field from a bridge request.
+ * @param json Source JSON payload.
+ * @param key Field name.
+ * @return Newly allocated string value or NULL.
+ */
+static char *kc_wvw_bridge_get_string(const char *json, const char *key) {
+    char pattern[64];
+    const char *start;
+    const char *end;
+
+    if (!json || !key) {
+        return NULL;
+    }
+
+    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
+    start = strstr(json, pattern);
+    if (!start) {
+        return NULL;
+    }
+
+    start += strlen(pattern);
+    end = strchr(start, '"');
+    if (!end) {
+        return NULL;
+    }
+
+    return kc_wvw_strndup_range(start, (size_t)(end - start));
+}
+
+/**
+ * Extract the params payload from one bridge request.
+ * @param json Source JSON payload.
+ * @return Newly allocated JSON fragment or NULL.
+ */
+static char *kc_wvw_bridge_get_params(const char *json) {
+    const char *start;
+    const char *end;
+
+    if (!json) {
+        return NULL;
+    }
+
+    start = strstr(json, "\"params\":");
+    if (!start) {
+        return kc_wvw_strdup("null");
+    }
+
+    start += 9;
+    end = strrchr(start, '}');
+    if (!end) {
+        return NULL;
+    }
+
+    return kc_wvw_strndup_range(start, (size_t)(end - start));
+}
+
+/**
+ * Build one bridge response payload.
+ * @param id Request identifier.
+ * @param ok Success flag.
+ * @param body Serialized result or error object.
+ * @return Newly allocated response payload or NULL.
+ */
+static char *kc_wvw_bridge_wrap_response(const char *id, int ok, const char *body) {
+    kc_wvw_text_buf_t buf;
+
+    if (!id || !body || kc_wvw_text_buf_init(&buf) != KC_WVW_OK) {
+        return NULL;
+    }
+
+    if (kc_wvw_text_buf_append(&buf, "{\"id\":\"") != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, id) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, ok ? "\",\"ok\":true,\"result\":" : "\",\"ok\":false,\"error\":") != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, body) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, "}") != KC_WVW_OK) {
+        free(buf.data);
+        return NULL;
+    }
+
+    return buf.data;
+}
+
+/**
+ * Build one JSON error object.
+ * @param code Error code string.
+ * @param message Error message string.
+ * @return Newly allocated JSON error object or NULL.
+ */
+static char *kc_wvw_bridge_error_object(const char *code, const char *message) {
+    kc_wvw_text_buf_t buf;
+
+    if (!code || !message || kc_wvw_text_buf_init(&buf) != KC_WVW_OK) {
+        return NULL;
+    }
+
+    if (kc_wvw_text_buf_append(&buf, "{\"code\":\"") != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, code) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, "\",\"message\":\"") != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, message) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, "\"}") != KC_WVW_OK) {
+        free(buf.data);
+        return NULL;
+    }
+
+    return buf.data;
+}
+
+/**
+ * Build the injected NativeBridge bootstrap script.
+ * @param bridge Bridge state.
+ * @return Newly allocated script text or NULL.
+ */
+static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge) {
+    kc_wvw_text_buf_t buf;
+    int i;
+
+    if (!bridge || kc_wvw_text_buf_init(&buf) != KC_WVW_OK) {
+        return NULL;
+    }
+
+    if (kc_wvw_text_buf_append(&buf, "(function(){if(window.NativeBridge){return;}var __kcWvwPending={};var __kcWvwSeq=0;window.__kcWvwReceive=function(msg){if(msg&&typeof msg.id==='string'){var cb=__kcWvwPending[msg.id];if(cb){delete __kcWvwPending[msg.id];cb(msg.ok?null:(msg.error||{code:'ERROR',message:'Bridge error'}),msg.ok?msg.result:null);}return;}window.dispatchEvent(new CustomEvent('") != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, KC_WVW_BRIDGE_EVENT_NAME) != KC_WVW_OK ||
+        kc_wvw_text_buf_append(&buf, "',{detail:msg}));};window.NativeBridge={};function __kcWvwSend(method,params,callback){var id=String(++__kcWvwSeq);if(typeof callback==='function'){__kcWvwPending[id]=callback;}window.webkit.messageHandlers.kc_wvw_native.postMessage(JSON.stringify({id:id,method:method,params:params===undefined?null:params}));}") != KC_WVW_OK) {
+        free(buf.data);
+        return NULL;
+    }
+
+    for (i = 0; i < bridge->method_count; i++) {
+        if (kc_wvw_text_buf_append(&buf, "window.NativeBridge.") != KC_WVW_OK ||
+            kc_wvw_text_buf_append(&buf, bridge->methods[i]) != KC_WVW_OK ||
+            kc_wvw_text_buf_append(&buf, "=function(params,callback){return __kcWvwSend('") != KC_WVW_OK ||
+            kc_wvw_text_buf_append(&buf, bridge->methods[i]) != KC_WVW_OK ||
+            kc_wvw_text_buf_append(&buf, "',params,callback);};") != KC_WVW_OK) {
+            free(buf.data);
+            return NULL;
+        }
+    }
+
+    if (kc_wvw_text_buf_append(&buf, "}());") != KC_WVW_OK) {
+        free(buf.data);
+        return NULL;
+    }
+
+    return buf.data;
+}
+
+/**
+ * Escape one JSON payload for direct JavaScript evaluation.
+ * @param json JSON payload.
+ * @return Newly allocated escaped string or NULL.
+ */
+static char *kc_wvw_bridge_escape_js_string(const char *json) {
+    kc_wvw_text_buf_t buf;
+    size_t i;
+
+    if (!json || kc_wvw_text_buf_init(&buf) != KC_WVW_OK) {
+        return NULL;
+    }
+
+    for (i = 0; json[i]; i++) {
+        if (json[i] == '\\' || json[i] == '\'') {
+            if (kc_wvw_text_buf_append_n(&buf, "\\", 1) != KC_WVW_OK) {
+                free(buf.data);
+                return NULL;
+            }
+        }
+        if (json[i] == '\n') {
+            if (kc_wvw_text_buf_append(&buf, "\\n") != KC_WVW_OK) {
+                free(buf.data);
+                return NULL;
+            }
+            continue;
+        }
+        if (json[i] == '\r') {
+            if (kc_wvw_text_buf_append(&buf, "\\r") != KC_WVW_OK) {
+                free(buf.data);
+                return NULL;
+            }
+            continue;
+        }
+        if (kc_wvw_text_buf_append_n(&buf, &json[i], 1) != KC_WVW_OK) {
+            free(buf.data);
+            return NULL;
+        }
+    }
+
+    return buf.data;
+}
+
+/**
+ * Deliver one JSON payload into the WebView bridge runtime.
+ * @param ctx Window context.
+ * @param json JSON payload.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_bridge_post_json(kc_wvw_t *ctx, const char *json) {
+    char *escaped;
+    char *script;
+    size_t cap;
+
+    if (!ctx || !ctx->web_view || !json || strlen(json) > KC_WVW_BRIDGE_MAX_MESSAGE) {
+        return KC_WVW_ERROR;
+    }
+
+    escaped = kc_wvw_bridge_escape_js_string(json);
+    if (!escaped) {
+        return KC_WVW_ERROR;
+    }
+
+    cap = strlen(escaped) + 64;
+    script = (char *)malloc(cap);
+    if (!script) {
+        free(escaped);
+        return KC_WVW_ERROR;
+    }
+
+    snprintf(script, cap, "window.__kcWvwReceive(JSON.parse('%s'));", escaped);
+    webkit_web_view_evaluate_javascript(ctx->web_view, script, -1, NULL, NULL, NULL, NULL, NULL);
+    free(escaped);
+    free(script);
+    return KC_WVW_OK;
+}
+
+/**
+ * Dispatch one bridge request into the application callback.
+ * @param ctx Window context.
+ * @param json Request payload.
+ * @return Newly allocated response payload or NULL.
+ */
+static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
+    char *id;
+    char *method;
+    char *params;
+    char *result;
+    char *error;
+    char *response;
+    int rc;
+
+    if (!ctx || !json || strlen(json) > KC_WVW_BRIDGE_MAX_MESSAGE) {
+        error = kc_wvw_bridge_error_object("BAD_REQUEST", "Bridge request is invalid.");
+        response = error ? kc_wvw_bridge_wrap_response("0", 0, error) : NULL;
+        free(error);
+        return response;
+    }
+
+    id = kc_wvw_bridge_get_string(json, "id");
+    method = kc_wvw_bridge_get_string(json, "method");
+    params = kc_wvw_bridge_get_params(json);
+    if (!id || !method || !params) {
+        free(id);
+        free(method);
+        free(params);
+        error = kc_wvw_bridge_error_object("BAD_REQUEST", "Bridge request is malformed.");
+        response = error ? kc_wvw_bridge_wrap_response("0", 0, error) : NULL;
+        free(error);
+        return response;
+    }
+
+    if (!kc_wvw_bridge_method_allowed(&ctx->bridge, method)) {
+        error = kc_wvw_bridge_error_object("METHOD_NOT_ALLOWED", "Bridge method is not allowed.");
+        response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+        free(id);
+        free(method);
+        free(params);
+        free(error);
+        return response;
+    }
+
+    result = NULL;
+    rc = ctx->bridge.callback(ctx, method, params, &result, ctx->bridge.userdata);
+    if (rc == KC_WVW_OK) {
+        if (!result) {
+            result = kc_wvw_strdup("null");
+        }
+        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+    } else {
+        if (!result) {
+            result = kc_wvw_bridge_error_object("CALL_FAILED", "Bridge callback failed.");
+        }
+        response = result ? kc_wvw_bridge_wrap_response(id, 0, result) : NULL;
+    }
+
+    free(id);
+    free(method);
+    free(params);
+    free(result);
+    return response;
 }
 
 /**
@@ -1430,6 +2911,104 @@ static void kc_wvw_linux_destroy(GtkWidget *widget, gpointer userdata) {
         ctx->running = 0;
     }
     gtk_main_quit();
+}
+
+/**
+ * Handle one message received from the injected NativeBridge runtime.
+ * @param manager User content manager.
+ * @param js_result JavaScript result.
+ * @param user_data Window context.
+ * @return None.
+ */
+static void kc_wvw_linux_bridge_message(WebKitUserContentManager *manager, WebKitJavascriptResult *js_result, gpointer user_data) {
+    JSCValue *value;
+    char *request;
+    char *response;
+    kc_wvw_t *ctx;
+
+    (void)manager;
+    ctx = (kc_wvw_t *)user_data;
+    if (!ctx) {
+        return;
+    }
+
+    value = webkit_javascript_result_get_js_value(js_result);
+    request = value ? jsc_value_to_string(value) : NULL;
+    if (!request) {
+        return;
+    }
+
+    response = kc_wvw_bridge_dispatch_request(ctx, request);
+    if (response) {
+        kc_wvw_bridge_post_json(ctx, response);
+        free(response);
+    }
+    g_free(request);
+}
+
+/**
+ * Decide whether one navigation request stays inside the trusted WebView.
+ * @param web_view Web view.
+ * @param decision Policy decision.
+ * @param type Policy decision type.
+ * @param user_data Window context.
+ * @return TRUE when the navigation is handled, otherwise FALSE.
+ */
+static gboolean kc_wvw_linux_bridge_policy(WebKitWebView *web_view, WebKitPolicyDecision *decision, WebKitPolicyDecisionType type, gpointer user_data) {
+    WebKitNavigationPolicyDecision *nav;
+    WebKitNavigationAction *action;
+    WebKitURIRequest *request;
+    const gchar *uri;
+    kc_wvw_t *ctx;
+
+    (void)web_view;
+    ctx = (kc_wvw_t *)user_data;
+    if (!ctx || !ctx->bridge.callback || type != WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION) {
+        return FALSE;
+    }
+
+    nav = WEBKIT_NAVIGATION_POLICY_DECISION(decision);
+    action = webkit_navigation_policy_decision_get_navigation_action(nav);
+    request = webkit_navigation_action_get_request(action);
+    uri = request ? webkit_uri_request_get_uri(request) : NULL;
+    if (uri && !kc_wvw_bridge_url_trusted(&ctx->bridge, uri)) {
+        webkit_policy_decision_ignore(decision);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+/**
+ * Install the configured bridge into the current WebView.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_linux_install_bridge(kc_wvw_t *ctx) {
+    WebKitUserContentManager *manager;
+    char *script;
+
+    if (!ctx || !ctx->web_view || !ctx->bridge.callback) {
+        return KC_WVW_OK;
+    }
+
+    manager = webkit_web_view_get_user_content_manager(ctx->web_view);
+    if (!manager) {
+        return KC_WVW_ERROR;
+    }
+
+    script = kc_wvw_bridge_bootstrap_script(&ctx->bridge);
+    if (!script) {
+        return KC_WVW_ERROR;
+    }
+
+    webkit_user_content_manager_unregister_script_message_handler(manager, "kc_wvw_native");
+    webkit_user_content_manager_register_script_message_handler(manager, "kc_wvw_native");
+    g_signal_connect(manager, "script-message-received::kc_wvw_native", G_CALLBACK(kc_wvw_linux_bridge_message), ctx);
+    webkit_user_content_manager_add_script(manager, webkit_user_script_new(script, WEBKIT_USER_CONTENT_INJECT_TOP_FRAME, WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, NULL, NULL));
+    g_signal_connect(ctx->web_view, "decide-policy", G_CALLBACK(kc_wvw_linux_bridge_policy), ctx);
+    free(script);
+    return KC_WVW_OK;
 }
 
 /**
@@ -1707,6 +3286,7 @@ int kc_wvw_close(kc_wvw_t *ctx) {
     }
 
     free(ctx->signal_handlers);
+    kc_wvw_bridge_state_free(&ctx->bridge);
     kc_wvw_options_free(&ctx->opts);
     free(ctx);
     return KC_WVW_OK;
@@ -1741,9 +3321,49 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
     if (!ctx || !url) {
         return KC_WVW_ERROR;
     }
+    if (ctx->bridge.callback && !kc_wvw_bridge_url_trusted(&ctx->bridge, url)) {
+        return KC_WVW_ERROR;
+    }
 
     webkit_web_view_load_uri(ctx->web_view, url);
     return KC_WVW_OK;
+}
+
+/**
+ * Enable one native bridge with a fixed method whitelist.
+ * @param ctx Window context.
+ * @param opts Bridge configuration options.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
+    kc_wvw_bridge_state_t bridge;
+
+    if (!ctx || !opts) {
+        return KC_WVW_ERROR;
+    }
+
+    memset(&bridge, 0, sizeof(bridge));
+    if (kc_wvw_bridge_state_copy(&bridge, opts) != KC_WVW_OK) {
+        return KC_WVW_ERROR;
+    }
+    if (!kc_wvw_bridge_url_trusted(&bridge, ctx->opts.url)) {
+        kc_wvw_bridge_state_free(&bridge);
+        return KC_WVW_ERROR;
+    }
+
+    kc_wvw_bridge_state_free(&ctx->bridge);
+    ctx->bridge = bridge;
+    return kc_wvw_linux_install_bridge(ctx);
+}
+
+/**
+ * Deliver one native bridge event into the current WebView.
+ * @param ctx Window context.
+ * @param json JSON payload to dispatch as the event detail.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json) {
+    return kc_wvw_bridge_post_json(ctx, json);
 }
 
 #endif
