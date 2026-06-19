@@ -41,6 +41,9 @@ typedef struct {
     int height;
     int fullscreen;
     int borderless;
+    int always_on_top;
+    int click_through;
+    int no_focus;
 } kc_wvw_options_t;
 
 typedef struct {

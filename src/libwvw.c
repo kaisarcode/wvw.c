@@ -96,6 +96,9 @@ static const kc_env_map_t env_config_table[] = {
     { "KC_WVW_HEIGHT", offsetof(kc_wvw_options_t, height), KC_ENV_TYPE_INT },
     { "KC_WVW_FULLSCREEN", offsetof(kc_wvw_options_t, fullscreen), KC_ENV_TYPE_INT },
     { "KC_WVW_BORDERLESS", offsetof(kc_wvw_options_t, borderless), KC_ENV_TYPE_INT },
+    { "KC_WVW_ALWAYS_ON_TOP", offsetof(kc_wvw_options_t, always_on_top), KC_ENV_TYPE_INT },
+    { "KC_WVW_CLICK_THROUGH", offsetof(kc_wvw_options_t, click_through), KC_ENV_TYPE_INT },
+    { "KC_WVW_NO_FOCUS", offsetof(kc_wvw_options_t, no_focus), KC_ENV_TYPE_INT },
 };
 
 static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
@@ -155,6 +158,7 @@ static ULONG STDMETHODCALLTYPE kc_wvw_message_add_ref(ICoreWebView2WebMessageRec
 static ULONG STDMETHODCALLTYPE kc_wvw_message_release(ICoreWebView2WebMessageReceivedEventHandler *iface);
 static HRESULT STDMETHODCALLTYPE kc_wvw_message_invoke(ICoreWebView2WebMessageReceivedEventHandler *iface, ICoreWebView2 *sender, ICoreWebView2WebMessageReceivedEventArgs *args);
 static wchar_t *kc_wvw_utf16_from_utf8(const char *text);
+static int kc_wvw_parse_background_color(const char *text, BYTE *out_a, BYTE *out_r, BYTE *out_g, BYTE *out_b);
 
 static ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandlerVtbl kc_wvw_environment_vtbl = {
     kc_wvw_environment_query_interface,
@@ -591,6 +595,30 @@ static char *kc_wvw_strdup(const char *text) {
 
     memcpy(copy, text, length + 1);
     return copy;
+}
+
+/**
+ * Return whether the configured background requests a transparent host surface.
+ * @param text Background color in RRGGBB or AARRGGBB format.
+ * @return Non-zero when the host should enter transparent mode, otherwise zero.
+ */
+static int kc_wvw_background_transparent(const char *text) {
+    BYTE a;
+    BYTE r;
+    BYTE g;
+    BYTE b;
+
+    if (!text) {
+        return 0;
+    }
+    if (kc_wvw_parse_background_color(text, &a, &r, &g, &b) != KC_WVW_OK) {
+        return 0;
+    }
+
+    (void)r;
+    (void)g;
+    (void)b;
+    return a == 0x00;
 }
 
 typedef struct {
@@ -1209,6 +1237,9 @@ static HBRUSH kc_wvw_background_brush(const char *text) {
     if (!text || kc_wvw_parse_background_color(text, &a, &r, &g, &b) != KC_WVW_OK) {
         return NULL;
     }
+    if (a == 0x00) {
+        return NULL;
+    }
 
     return CreateSolidBrush(RGB(r, g, b));
 }
@@ -1382,6 +1413,40 @@ static void kc_wvw_update_bounds(kc_wvw_t *ctx) {
 
     GetClientRect(ctx->hwnd, &bounds);
     ICoreWebView2Controller_put_Bounds(ctx->controller, bounds);
+}
+
+/**
+ * Apply topmost and click-through host modes on Windows.
+ * @param ctx Window context.
+ * @return None.
+ */
+static void kc_wvw_windows_apply_window_modes(kc_wvw_t *ctx) {
+    LONG_PTR ex_style;
+
+    if (!ctx || !ctx->hwnd) {
+        return;
+    }
+
+    if (ctx->opts.always_on_top) {
+        SetWindowPos(ctx->hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    }
+    if (ctx->opts.click_through) {
+        ex_style = GetWindowLongPtrW(ctx->hwnd, GWL_EXSTYLE);
+        ex_style |= WS_EX_TRANSPARENT;
+        if (kc_wvw_background_transparent(ctx->opts.background)) {
+            ex_style |= WS_EX_LAYERED;
+        }
+        if (ctx->opts.no_focus) {
+            ex_style |= WS_EX_NOACTIVATE;
+        }
+        SetWindowLongPtrW(ctx->hwnd, GWL_EXSTYLE, ex_style);
+        return;
+    }
+    if (ctx->opts.no_focus) {
+        ex_style = GetWindowLongPtrW(ctx->hwnd, GWL_EXSTYLE);
+        ex_style |= WS_EX_NOACTIVATE;
+        SetWindowLongPtrW(ctx->hwnd, GWL_EXSTYLE, ex_style);
+    }
 }
 
 /**
@@ -1603,6 +1668,9 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
         }
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     case WM_SETFOCUS:
+        if (ctx && ctx->opts.no_focus) {
+            return 0;
+        }
         if (ctx && ctx->controller) {
             ICoreWebView2Controller_MoveFocus(ctx->controller, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
         }
@@ -1657,6 +1725,12 @@ static int kc_wvw_create_window(kc_wvw_t *ctx) {
     if (ctx->opts.borderless || ctx->opts.fullscreen) {
         style = WS_POPUP | WS_VISIBLE;
     }
+    if (kc_wvw_background_transparent(ctx->opts.background)) {
+        ex_style |= WS_EX_LAYERED;
+    }
+    if (ctx->opts.no_focus) {
+        ex_style |= WS_EX_NOACTIVATE;
+    }
 
     rect.left = 0;
     rect.top = 0;
@@ -1691,6 +1765,10 @@ static int kc_wvw_create_window(kc_wvw_t *ctx) {
     if (!ctx->hwnd) {
         return KC_WVW_ERROR;
     }
+    if (kc_wvw_background_transparent(ctx->opts.background)) {
+        SetLayeredWindowAttributes(ctx->hwnd, 0, 255, LWA_ALPHA);
+    }
+    kc_wvw_windows_apply_window_modes(ctx);
 
     ShowWindow(ctx->hwnd, SW_SHOWDEFAULT);
     UpdateWindow(ctx->hwnd);
@@ -2044,6 +2122,9 @@ int kc_wvw_open(kc_wvw_t **ctx_out, kc_wvw_options_t *opts) {
     ctx->opts.height = opts->height;
     ctx->opts.fullscreen = opts->fullscreen;
     ctx->opts.borderless = opts->borderless;
+    ctx->opts.always_on_top = opts->always_on_top;
+    ctx->opts.click_through = opts->click_through;
+    ctx->opts.no_focus = opts->no_focus;
     ctx->pending_url = kc_wvw_strdup(opts->url);
     if (!ctx->opts.url || !ctx->opts.title || (opts->background && !ctx->opts.background) || !ctx->pending_url) {
         kc_wvw_close(ctx);
@@ -2299,6 +2380,9 @@ static const kc_env_map_t env_config_table[] = {
     { "KC_WVW_HEIGHT", offsetof(kc_wvw_options_t, height), KC_ENV_TYPE_INT },
     { "KC_WVW_FULLSCREEN", offsetof(kc_wvw_options_t, fullscreen), KC_ENV_TYPE_INT },
     { "KC_WVW_BORDERLESS", offsetof(kc_wvw_options_t, borderless), KC_ENV_TYPE_INT },
+    { "KC_WVW_ALWAYS_ON_TOP", offsetof(kc_wvw_options_t, always_on_top), KC_ENV_TYPE_INT },
+    { "KC_WVW_CLICK_THROUGH", offsetof(kc_wvw_options_t, click_through), KC_ENV_TYPE_INT },
+    { "KC_WVW_NO_FOCUS", offsetof(kc_wvw_options_t, no_focus), KC_ENV_TYPE_INT },
 };
 
 static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
@@ -2862,6 +2946,72 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
 }
 
 /**
+ * Prepare one GTK host window for transparent compositing.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_linux_prepare_transparent_window(kc_wvw_t *ctx) {
+    GdkScreen *screen;
+    GdkVisual *visual;
+
+    if (!ctx || !ctx->window) {
+        return KC_WVW_ERROR;
+    }
+
+    screen = gtk_widget_get_screen(ctx->window);
+    if (!screen) {
+        return KC_WVW_ERROR;
+    }
+
+    visual = gdk_screen_get_rgba_visual(screen);
+    if (!visual) {
+        return KC_WVW_OK;
+    }
+
+    gtk_widget_set_visual(ctx->window, visual);
+    gtk_widget_set_app_paintable(ctx->window, TRUE);
+    return KC_WVW_OK;
+}
+
+/**
+ * Apply topmost and click-through host modes on Linux.
+ * @param ctx Window context.
+ * @return None.
+ */
+static void kc_wvw_linux_apply_window_modes(kc_wvw_t *ctx) {
+    cairo_region_t *region;
+    GdkWindow *window;
+    GdkWindow *web_window;
+
+    if (!ctx || !ctx->window) {
+        return;
+    }
+
+    if (ctx->opts.always_on_top) {
+        gtk_window_set_keep_above(GTK_WINDOW(ctx->window), TRUE);
+    }
+    if (ctx->opts.no_focus) {
+        gtk_window_set_accept_focus(GTK_WINDOW(ctx->window), FALSE);
+        gtk_window_set_focus_on_map(GTK_WINDOW(ctx->window), FALSE);
+    }
+    if (ctx->opts.click_through) {
+        window = gtk_widget_get_window(ctx->window);
+        web_window = ctx->web_view ? gtk_widget_get_window(GTK_WIDGET(ctx->web_view)) : NULL;
+        if (window) {
+            gdk_window_set_pass_through(window, TRUE);
+            region = cairo_region_create();
+            if (region) {
+                gdk_window_input_shape_combine_region(window, region, 0, 0);
+                cairo_region_destroy(region);
+            }
+        }
+        if (web_window) {
+            gdk_window_set_pass_through(web_window, TRUE);
+        }
+    }
+}
+
+/**
  * Parses one hexadecimal WebView background color.
  * @param text Color text in RRGGBB or AARRGGBB format.
  * @param out_rgba Destination GTK RGBA value.
@@ -2897,6 +3047,24 @@ static int kc_wvw_parse_background_color(const char *text, GdkRGBA *out_rgba) {
 }
 
 /**
+ * Return whether the configured background requests a transparent host surface.
+ * @param text Background color in RRGGBB or AARRGGBB format.
+ * @return Non-zero when the host should enter transparent mode, otherwise zero.
+ */
+static int kc_wvw_background_transparent(const char *text) {
+    GdkRGBA rgba;
+
+    if (!text) {
+        return 0;
+    }
+    if (kc_wvw_parse_background_color(text, &rgba) != KC_WVW_OK) {
+        return 0;
+    }
+
+    return rgba.alpha <= 0.0;
+}
+
+/**
  * Close the GTK main loop when the native window is destroyed.
  * @param widget GTK widget.
  * @param userdata Window context.
@@ -2909,6 +3077,8 @@ static void kc_wvw_linux_destroy(GtkWidget *widget, gpointer userdata) {
 
     if (ctx) {
         ctx->running = 0;
+        ctx->window = NULL;
+        ctx->web_view = NULL;
     }
     gtk_main_quit();
 }
@@ -3037,6 +3207,9 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
     if (!ctx->web_view) {
         return KC_WVW_ERROR;
     }
+    if (kc_wvw_background_transparent(ctx->opts.background) && kc_wvw_linux_prepare_transparent_window(ctx) != KC_WVW_OK) {
+        return KC_WVW_ERROR;
+    }
     if (ctx->opts.background) {
         if (kc_wvw_parse_background_color(ctx->opts.background, &background) != KC_WVW_OK) {
             fprintf(stderr, "wvw: invalid background color '%s'\n", ctx->opts.background);
@@ -3048,6 +3221,7 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
     gtk_container_add(GTK_CONTAINER(ctx->window), GTK_WIDGET(ctx->web_view));
     g_signal_connect(ctx->window, "destroy", G_CALLBACK(kc_wvw_linux_destroy), ctx);
     gtk_widget_show_all(ctx->window);
+    kc_wvw_linux_apply_window_modes(ctx);
     return KC_WVW_OK;
 }
 
@@ -3252,6 +3426,9 @@ int kc_wvw_open(kc_wvw_t **ctx_out, kc_wvw_options_t *opts) {
     ctx->opts.height = opts->height;
     ctx->opts.fullscreen = opts->fullscreen;
     ctx->opts.borderless = opts->borderless;
+    ctx->opts.always_on_top = opts->always_on_top;
+    ctx->opts.click_through = opts->click_through;
+    ctx->opts.no_focus = opts->no_focus;
 
     if (!ctx->opts.url || !ctx->opts.title || (opts->background && !ctx->opts.background)) {
         kc_wvw_close(ctx);
@@ -3281,7 +3458,7 @@ int kc_wvw_close(kc_wvw_t *ctx) {
         return KC_WVW_OK;
     }
 
-    if (ctx->window) {
+    if (ctx->window && GTK_IS_WIDGET(ctx->window)) {
         gtk_widget_destroy(ctx->window);
     }
 

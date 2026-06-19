@@ -56,6 +56,9 @@ Start in fullscreen mode:
 | `--height <px>` | Set the initial window height. |
 | `--fullscreen` | Open the window in fullscreen mode. |
 | `--borderless` | Open the window without native decorations. |
+| `--always-on-top` | Keep the window above normal windows. |
+| `--click-through` | Ignore mouse input on the host window. |
+| `--no-focus` | Prevent the window from activating for keyboard focus. |
 | `-h`, `--help` | Show help and usage. |
 | `-v`, `--version` | Show build version. |
 
@@ -72,6 +75,9 @@ Start in fullscreen mode:
 | `KC_WVW_HEIGHT` | Default window height. |
 | `KC_WVW_FULLSCREEN` | Default fullscreen flag (`0` or `1`). |
 | `KC_WVW_BORDERLESS` | Default borderless flag (`0` or `1`). |
+| `KC_WVW_ALWAYS_ON_TOP` | Default topmost flag (`0` or `1`). |
+| `KC_WVW_CLICK_THROUGH` | Default click-through flag (`0` or `1`). |
+| `KC_WVW_NO_FOCUS` | Default no-focus flag (`0` or `1`). |
 | `KC_WVW_BROWSER_ARGS` | Windows WebView2 browser arguments. |
 
 ---
@@ -219,6 +225,19 @@ int main(void) {
 - `kc_wvw_close()` releases the window, WebView, and associated resources.
 
 Color input accepts `RRGGBB` and `AARRGGBB`. On Windows, alpha must be `00` or `FF` because WebView2 does not support semi-transparent startup colors.
+
+When `background` uses `AARRGGBB` with `AA=00`, `wvw` enters one experimental transparent host mode:
+
+- Linux requests one RGBA compositor visual for the host window.
+- Windows enables one layered host window and requests one transparent WebView2 background.
+
+This mode is best-effort. It depends on the platform compositor and the embedded WebView backend. Borderless windows and transparent page CSS are still the intended setup for overlay-style applications.
+
+Overlay-oriented flags:
+
+- `always_on_top` / `--always-on-top` keeps the host window above normal windows.
+- `click_through` / `--click-through` lets mouse input pass through the host window.
+- `no_focus` / `--no-focus` keeps the host window from stealing keyboard focus.
 
 ---
 

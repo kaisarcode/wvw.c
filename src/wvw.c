@@ -30,6 +30,9 @@ static void kc_print_help(const char *name) {
     printf("    --height <px>     Set window height\n");
     printf("    --fullscreen      Start in fullscreen mode\n");
     printf("    --borderless      Start in borderless mode\n");
+    printf("    --always-on-top   Keep the window above normal windows\n");
+    printf("    --click-through   Ignore mouse input on the host window\n");
+    printf("    --no-focus        Do not activate the window for keyboard focus\n");
     printf("    -h, --help        Show this help\n");
     printf("    -v, --version     Show build version\n");
 }
@@ -129,6 +132,12 @@ int main(int argc, char **argv) {
             opts.fullscreen = 1;
         } else if (strcmp(argv[i], "--borderless") == 0) {
             opts.borderless = 1;
+        } else if (strcmp(argv[i], "--always-on-top") == 0) {
+            opts.always_on_top = 1;
+        } else if (strcmp(argv[i], "--click-through") == 0) {
+            opts.click_through = 1;
+        } else if (strcmp(argv[i], "--no-focus") == 0) {
+            opts.no_focus = 1;
         } else {
             fprintf(stderr, "wvw: unknown option '%s'\n", argv[i]);
             kc_wvw_options_free(&opts);

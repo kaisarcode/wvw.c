@@ -190,6 +190,7 @@ kc_test_write_helper() {
         '    if (opts.url != NULL || opts.title != NULL) return 1;' \
         '    if (opts.width != 1280 || opts.height != 720) return 1;' \
         '    if (opts.fullscreen != 0 || opts.borderless != 0) return 1;' \
+        '    if (opts.always_on_top != 0 || opts.click_through != 0 || opts.no_focus != 0) return 1;' \
         '' \
         '    setenv("KC_WVW_URL", "https://example.com", 1);' \
         '    setenv("KC_WVW_TITLE", "Example", 1);' \
@@ -197,11 +198,15 @@ kc_test_write_helper() {
         '    setenv("KC_WVW_HEIGHT", "900", 1);' \
         '    setenv("KC_WVW_FULLSCREEN", "1", 1);' \
         '    setenv("KC_WVW_BORDERLESS", "1", 1);' \
+        '    setenv("KC_WVW_ALWAYS_ON_TOP", "1", 1);' \
+        '    setenv("KC_WVW_CLICK_THROUGH", "1", 1);' \
+        '    setenv("KC_WVW_NO_FOCUS", "1", 1);' \
         '    kc_wvw_options_load_env(&opts);' \
         '    if (!opts.url || strcmp(opts.url, "https://example.com") != 0) return 1;' \
         '    if (!opts.title || strcmp(opts.title, "Example") != 0) return 1;' \
         '    if (opts.width != 1440 || opts.height != 900) return 1;' \
         '    if (opts.fullscreen != 1 || opts.borderless != 1) return 1;' \
+        '    if (opts.always_on_top != 1 || opts.click_through != 1 || opts.no_focus != 1) return 1;' \
         '' \
         '    setenv("KC_WVW_WIDTH", "bad", 1);' \
         '    setenv("KC_WVW_HEIGHT", "nope", 1);' \
@@ -217,6 +222,9 @@ kc_test_write_helper() {
         '    unsetenv("KC_WVW_HEIGHT");' \
         '    unsetenv("KC_WVW_FULLSCREEN");' \
         '    unsetenv("KC_WVW_BORDERLESS");' \
+        '    unsetenv("KC_WVW_ALWAYS_ON_TOP");' \
+        '    unsetenv("KC_WVW_CLICK_THROUGH");' \
+        '    unsetenv("KC_WVW_NO_FOCUS");' \
         '' \
         '    if (kc_wvw_open(NULL, &opts) != KC_WVW_ERROR) return 1;' \
         '    if (kc_wvw_open(&ctx, NULL) != KC_WVW_ERROR) return 1;' \
