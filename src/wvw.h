@@ -26,6 +26,7 @@ typedef void (*kc_wvw_signal_callback_t)(kc_wvw_t *ctx);
 typedef struct {
     char *url;
     char *title;
+    char *background;
     int width;
     int height;
     int fullscreen;

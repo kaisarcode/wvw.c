@@ -70,6 +70,7 @@ struct kc_wvw {
 static const kc_env_map_t env_config_table[] = {
     { "KC_WVW_URL", offsetof(kc_wvw_options_t, url), KC_ENV_TYPE_STR },
     { "KC_WVW_TITLE", offsetof(kc_wvw_options_t, title), KC_ENV_TYPE_STR },
+    { "KC_WVW_BACKGROUND", offsetof(kc_wvw_options_t, background), KC_ENV_TYPE_STR },
     { "KC_WVW_WIDTH", offsetof(kc_wvw_options_t, width), KC_ENV_TYPE_INT },
     { "KC_WVW_HEIGHT", offsetof(kc_wvw_options_t, height), KC_ENV_TYPE_INT },
     { "KC_WVW_FULLSCREEN", offsetof(kc_wvw_options_t, fullscreen), KC_ENV_TYPE_INT },
@@ -305,6 +306,72 @@ static char *kc_wvw_strdup(const char *text) {
 }
 
 /**
+ * Parses one hexadecimal WebView background color.
+ * @param text Color text in #RRGGBB or #AARRGGBB format.
+ * @param out_a Destination alpha byte.
+ * @param out_r Destination red byte.
+ * @param out_g Destination green byte.
+ * @param out_b Destination blue byte.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_parse_background_color(const char *text, BYTE *out_a, BYTE *out_r, BYTE *out_g, BYTE *out_b) {
+    size_t length;
+    unsigned int parts[4];
+
+    if (!text || !out_a || !out_r || !out_g || !out_b || text[0] != '#') {
+        return KC_WVW_ERROR;
+    }
+
+    length = strlen(text);
+    if (length == 7) {
+        if (sscanf(text + 1, "%2x%2x%2x", &parts[1], &parts[2], &parts[3]) != 3) {
+            return KC_WVW_ERROR;
+        }
+        parts[0] = 0xff;
+    } else if (length == 9) {
+        if (sscanf(text + 1, "%2x%2x%2x%2x", &parts[0], &parts[1], &parts[2], &parts[3]) != 4) {
+            return KC_WVW_ERROR;
+        }
+    } else {
+        return KC_WVW_ERROR;
+    }
+
+    *out_a = (BYTE)parts[0];
+    *out_r = (BYTE)parts[1];
+    *out_g = (BYTE)parts[2];
+    *out_b = (BYTE)parts[3];
+    return KC_WVW_OK;
+}
+
+/**
+ * Formats one parsed background color for the WebView2 environment variable.
+ * @param text Color text in #RRGGBB or #AARRGGBB format.
+ * @return Newly allocated AARRGGBB string or NULL.
+ */
+static char *kc_wvw_background_hex8(const char *text) {
+    BYTE a;
+    BYTE r;
+    BYTE g;
+    BYTE b;
+    char *color;
+
+    if (kc_wvw_parse_background_color(text, &a, &r, &g, &b) != KC_WVW_OK) {
+        return NULL;
+    }
+    if (a != 0x00 && a != 0xff) {
+        return NULL;
+    }
+
+    color = (char *)malloc(9);
+    if (!color) {
+        return NULL;
+    }
+
+    snprintf(color, 9, "%02X%02X%02X%02X", (unsigned int)a, (unsigned int)r, (unsigned int)g, (unsigned int)b);
+    return color;
+}
+
+/**
  * Converts UTF-8 text to UTF-16 text.
  * @param text UTF-8 source text.
  * @return Newly allocated UTF-16 text or NULL.
@@ -506,6 +573,38 @@ static void kc_wvw_apply_settings(kc_wvw_t *ctx) {
 }
 
 /**
+ * Applies one configured default background color to WebView2.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_apply_background_color(kc_wvw_t *ctx) {
+    ICoreWebView2Controller2 *controller2 = NULL;
+    COREWEBVIEW2_COLOR color;
+    HRESULT hr;
+
+    if (!ctx || !ctx->controller || !ctx->opts.background) {
+        return KC_WVW_OK;
+    }
+    if (kc_wvw_parse_background_color(ctx->opts.background, &color.A, &color.R, &color.G, &color.B) != KC_WVW_OK) {
+        fprintf(stderr, "wvw: invalid background color '%s'\n", ctx->opts.background);
+        return KC_WVW_ERROR;
+    }
+    if (color.A != 0x00 && color.A != 0xff) {
+        fprintf(stderr, "wvw: Windows background alpha must be 00 or FF\n");
+        return KC_WVW_ERROR;
+    }
+
+    hr = ICoreWebView2Controller_QueryInterface(ctx->controller, &IID_ICoreWebView2Controller2, (void **)&controller2);
+    if (FAILED(hr) || !controller2) {
+        return KC_WVW_OK;
+    }
+
+    hr = ICoreWebView2Controller2_put_DefaultBackgroundColor(controller2, color);
+    ICoreWebView2Controller2_Release(controller2);
+    return FAILED(hr) ? KC_WVW_ERROR : KC_WVW_OK;
+}
+
+/**
  * Navigates to the pending URL when the WebView is ready.
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
@@ -694,6 +793,7 @@ static int kc_wvw_start_webview(kc_wvw_t *ctx) {
     kc_wvw_environment_handler_t *handler;
     wchar_t *user_data_dir;
     const char *browser_args;
+    char *background;
     LPWSTR version = NULL;
     HRESULT hr;
 
@@ -721,6 +821,17 @@ static int kc_wvw_start_webview(kc_wvw_t *ctx) {
     browser_args = kc_wvw_browser_args();
     if (browser_args && *browser_args && !getenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")) {
         SetEnvironmentVariableA("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", browser_args);
+    }
+    background = NULL;
+    if (ctx->opts.background && *ctx->opts.background) {
+        background = kc_wvw_background_hex8(ctx->opts.background);
+        if (!background) {
+            fprintf(stderr, "wvw: invalid background color '%s'\n", ctx->opts.background);
+            free(user_data_dir);
+            return KC_WVW_ERROR;
+        }
+        SetEnvironmentVariableA("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", background);
+        free(background);
     }
 
     handler = kc_wvw_environment_handler_new(ctx);
@@ -797,6 +908,10 @@ static HRESULT STDMETHODCALLTYPE kc_wvw_controller_invoke(ICoreWebView2CreateCor
     }
 
     kc_wvw_update_bounds(ctx);
+    if (kc_wvw_apply_background_color(ctx) != KC_WVW_OK) {
+        ctx->init_state = KC_WVW_INIT_FAILED;
+        return S_OK;
+    }
     kc_wvw_apply_settings(ctx);
     if (kc_wvw_flush_pending_navigation(ctx) != KC_WVW_OK) {
         ctx->init_state = KC_WVW_INIT_FAILED;
@@ -863,8 +978,10 @@ void kc_wvw_options_free(kc_wvw_options_t *opts) {
 
     free(opts->url);
     free(opts->title);
+    free(opts->background);
     opts->url = NULL;
     opts->title = NULL;
+    opts->background = NULL;
 }
 
 /**
@@ -1001,12 +1118,13 @@ int kc_wvw_open(kc_wvw_t **ctx_out, kc_wvw_options_t *opts) {
     ctx->opts = *opts;
     ctx->opts.url = kc_wvw_strdup(opts->url);
     ctx->opts.title = opts->title ? kc_wvw_strdup(opts->title) : kc_wvw_strdup("wvw");
+    ctx->opts.background = opts->background ? kc_wvw_strdup(opts->background) : NULL;
     ctx->opts.width = opts->width;
     ctx->opts.height = opts->height;
     ctx->opts.fullscreen = opts->fullscreen;
     ctx->opts.borderless = opts->borderless;
     ctx->pending_url = kc_wvw_strdup(opts->url);
-    if (!ctx->opts.url || !ctx->opts.title || !ctx->pending_url) {
+    if (!ctx->opts.url || !ctx->opts.title || (opts->background && !ctx->opts.background) || !ctx->pending_url) {
         kc_wvw_close(ctx);
         return KC_WVW_ERROR;
     }
@@ -1149,6 +1267,7 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <webkit2/webkit2.h>
@@ -1182,6 +1301,7 @@ struct kc_wvw {
 static const kc_env_map_t env_config_table[] = {
     { "KC_WVW_URL", offsetof(kc_wvw_options_t, url), KC_ENV_TYPE_STR },
     { "KC_WVW_TITLE", offsetof(kc_wvw_options_t, title), KC_ENV_TYPE_STR },
+    { "KC_WVW_BACKGROUND", offsetof(kc_wvw_options_t, background), KC_ENV_TYPE_STR },
     { "KC_WVW_WIDTH", offsetof(kc_wvw_options_t, width), KC_ENV_TYPE_INT },
     { "KC_WVW_HEIGHT", offsetof(kc_wvw_options_t, height), KC_ENV_TYPE_INT },
     { "KC_WVW_FULLSCREEN", offsetof(kc_wvw_options_t, fullscreen), KC_ENV_TYPE_INT },
@@ -1227,6 +1347,41 @@ static char *kc_wvw_strdup(const char *text) {
 }
 
 /**
+ * Parses one hexadecimal WebView background color.
+ * @param text Color text in #RRGGBB or #AARRGGBB format.
+ * @param out_rgba Destination GTK RGBA value.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+static int kc_wvw_parse_background_color(const char *text, GdkRGBA *out_rgba) {
+    size_t length;
+    unsigned int parts[4];
+
+    if (!text || !out_rgba || text[0] != '#') {
+        return KC_WVW_ERROR;
+    }
+
+    length = strlen(text);
+    if (length == 7) {
+        if (sscanf(text + 1, "%2x%2x%2x", &parts[1], &parts[2], &parts[3]) != 3) {
+            return KC_WVW_ERROR;
+        }
+        parts[0] = 0xff;
+    } else if (length == 9) {
+        if (sscanf(text + 1, "%2x%2x%2x%2x", &parts[0], &parts[1], &parts[2], &parts[3]) != 4) {
+            return KC_WVW_ERROR;
+        }
+    } else {
+        return KC_WVW_ERROR;
+    }
+
+    out_rgba->red = (gdouble)parts[1] / 255.0;
+    out_rgba->green = (gdouble)parts[2] / 255.0;
+    out_rgba->blue = (gdouble)parts[3] / 255.0;
+    out_rgba->alpha = (gdouble)parts[0] / 255.0;
+    return KC_WVW_OK;
+}
+
+/**
  * Close the GTK main loop when the native window is destroyed.
  * @param widget GTK widget.
  * @param userdata Window context.
@@ -1249,6 +1404,8 @@ static void kc_wvw_linux_destroy(GtkWidget *widget, gpointer userdata) {
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
+    GdkRGBA background;
+
     ctx->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     if (!ctx->window) {
         return KC_WVW_ERROR;
@@ -1266,6 +1423,13 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
     ctx->web_view = WEBKIT_WEB_VIEW(webkit_web_view_new());
     if (!ctx->web_view) {
         return KC_WVW_ERROR;
+    }
+    if (ctx->opts.background) {
+        if (kc_wvw_parse_background_color(ctx->opts.background, &background) != KC_WVW_OK) {
+            fprintf(stderr, "wvw: invalid background color '%s'\n", ctx->opts.background);
+            return KC_WVW_ERROR;
+        }
+        webkit_web_view_set_background_color(ctx->web_view, &background);
     }
 
     gtk_container_add(GTK_CONTAINER(ctx->window), GTK_WIDGET(ctx->web_view));
@@ -1330,8 +1494,10 @@ void kc_wvw_options_free(kc_wvw_options_t *opts) {
 
     free(opts->url);
     free(opts->title);
+    free(opts->background);
     opts->url = NULL;
     opts->title = NULL;
+    opts->background = NULL;
 }
 
 /**
@@ -1468,12 +1634,13 @@ int kc_wvw_open(kc_wvw_t **ctx_out, kc_wvw_options_t *opts) {
     ctx->opts = *opts;
     ctx->opts.url = kc_wvw_strdup(opts->url);
     ctx->opts.title = opts->title ? kc_wvw_strdup(opts->title) : kc_wvw_strdup("wvw");
+    ctx->opts.background = opts->background ? kc_wvw_strdup(opts->background) : NULL;
     ctx->opts.width = opts->width;
     ctx->opts.height = opts->height;
     ctx->opts.fullscreen = opts->fullscreen;
     ctx->opts.borderless = opts->borderless;
 
-    if (!ctx->opts.url || !ctx->opts.title) {
+    if (!ctx->opts.url || !ctx->opts.title || (opts->background && !ctx->opts.background)) {
         kc_wvw_close(ctx);
         return KC_WVW_ERROR;
     }

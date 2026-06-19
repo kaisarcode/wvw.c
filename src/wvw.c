@@ -25,6 +25,7 @@ static void kc_print_help(const char *name) {
     printf("Options:\n");
     printf("    --url <url>       Set initial URL\n");
     printf("    --title <title>   Set window title\n");
+    printf("    --background <hex> Set WebView background color\n");
     printf("    --width <px>      Set window width\n");
     printf("    --height <px>     Set window height\n");
     printf("    --fullscreen      Start in fullscreen mode\n");
@@ -104,6 +105,14 @@ int main(int argc, char **argv) {
             }
             free(opts.title);
             opts.title = strdup(argv[i]);
+        } else if (strcmp(argv[i], "--background") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "wvw: missing value for --background\n");
+                kc_wvw_options_free(&opts);
+                return 1;
+            }
+            free(opts.background);
+            opts.background = strdup(argv[i]);
         } else if (strcmp(argv[i], "--width") == 0) {
             if (++i >= argc || kc_wvw_parse_int(argv[i], &opts.width) != KC_WVW_OK) {
                 fprintf(stderr, "wvw: invalid value for --width\n");
