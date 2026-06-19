@@ -58,6 +58,7 @@ struct kc_wvw {
     int closing;
     int com_initialized;
     HWND hwnd;
+    HBRUSH background_brush;
     HINSTANCE hinstance;
     HMODULE loader;
     ICoreWebView2Environment *environment;
@@ -369,6 +370,24 @@ static char *kc_wvw_background_hex8(const char *text) {
 
     snprintf(color, 9, "%02X%02X%02X%02X", (unsigned int)a, (unsigned int)r, (unsigned int)g, (unsigned int)b);
     return color;
+}
+
+/**
+ * Creates one native window background brush from the configured color.
+ * @param text Color text in RRGGBB or AARRGGBB format.
+ * @return Newly allocated brush or NULL.
+ */
+static HBRUSH kc_wvw_background_brush(const char *text) {
+    BYTE a;
+    BYTE r;
+    BYTE g;
+    BYTE b;
+
+    if (!text || kc_wvw_parse_background_color(text, &a, &r, &g, &b) != KC_WVW_OK) {
+        return NULL;
+    }
+
+    return CreateSolidBrush(RGB(r, g, b));
 }
 
 /**
@@ -686,6 +705,15 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
     case WM_SIZE:
         kc_wvw_update_bounds(ctx);
         return 0;
+    case WM_ERASEBKGND:
+        if (ctx && ctx->background_brush) {
+            RECT rect;
+            HDC dc = (HDC)wparam;
+            GetClientRect(hwnd, &rect);
+            FillRect(dc, &rect, ctx->background_brush);
+            return 1;
+        }
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
     case WM_SETFOCUS:
         if (ctx && ctx->controller) {
             ICoreWebView2Controller_MoveFocus(ctx->controller, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
@@ -733,6 +761,7 @@ static int kc_wvw_create_window(kc_wvw_t *ctx) {
     klass.hInstance = ctx->hinstance;
     klass.lpszClassName = class_name;
     klass.hCursor = LoadCursor(NULL, IDC_ARROW);
+    klass.hbrBackground = NULL;
     RegisterClassW(&klass);
 
     style = WS_OVERLAPPEDWINDOW;
@@ -1136,6 +1165,7 @@ int kc_wvw_open(kc_wvw_t **ctx_out, kc_wvw_options_t *opts) {
     }
     ctx->com_initialized = SUCCEEDED(hr);
     ctx->hinstance = GetModuleHandleW(NULL);
+    ctx->background_brush = kc_wvw_background_brush(ctx->opts.background);
 
     if (kc_wvw_load_loader(ctx) != KC_WVW_OK || kc_wvw_create_window(ctx) != KC_WVW_OK || kc_wvw_start_webview(ctx) != KC_WVW_OK || kc_wvw_wait_for_ready(ctx) != KC_WVW_OK) {
         kc_wvw_close(ctx);
@@ -1179,6 +1209,10 @@ int kc_wvw_close(kc_wvw_t *ctx) {
     if (ctx->loader) {
         FreeLibrary(ctx->loader);
         ctx->loader = NULL;
+    }
+    if (ctx->background_brush) {
+        DeleteObject(ctx->background_brush);
+        ctx->background_brush = NULL;
     }
 
     free(ctx->pending_url);
