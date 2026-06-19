@@ -307,7 +307,7 @@ static char *kc_wvw_strdup(const char *text) {
 
 /**
  * Parses one hexadecimal WebView background color.
- * @param text Color text in #RRGGBB or #AARRGGBB format.
+ * @param text Color text in RRGGBB or AARRGGBB format.
  * @param out_a Destination alpha byte.
  * @param out_r Destination red byte.
  * @param out_g Destination green byte.
@@ -318,18 +318,18 @@ static int kc_wvw_parse_background_color(const char *text, BYTE *out_a, BYTE *ou
     size_t length;
     unsigned int parts[4];
 
-    if (!text || !out_a || !out_r || !out_g || !out_b || text[0] != '#') {
+    if (!text || !out_a || !out_r || !out_g || !out_b) {
         return KC_WVW_ERROR;
     }
 
     length = strlen(text);
-    if (length == 7) {
-        if (sscanf(text + 1, "%2x%2x%2x", &parts[1], &parts[2], &parts[3]) != 3) {
+    if (length == 6) {
+        if (sscanf(text, "%2x%2x%2x", &parts[1], &parts[2], &parts[3]) != 3) {
             return KC_WVW_ERROR;
         }
         parts[0] = 0xff;
-    } else if (length == 9) {
-        if (sscanf(text + 1, "%2x%2x%2x%2x", &parts[0], &parts[1], &parts[2], &parts[3]) != 4) {
+    } else if (length == 8) {
+        if (sscanf(text, "%2x%2x%2x%2x", &parts[0], &parts[1], &parts[2], &parts[3]) != 4) {
             return KC_WVW_ERROR;
         }
     } else {
@@ -345,7 +345,7 @@ static int kc_wvw_parse_background_color(const char *text, BYTE *out_a, BYTE *ou
 
 /**
  * Formats one parsed background color for the WebView2 environment variable.
- * @param text Color text in #RRGGBB or #AARRGGBB format.
+ * @param text Color text in RRGGBB or AARRGGBB format.
  * @return Newly allocated AARRGGBB string or NULL.
  */
 static char *kc_wvw_background_hex8(const char *text) {
@@ -1348,7 +1348,7 @@ static char *kc_wvw_strdup(const char *text) {
 
 /**
  * Parses one hexadecimal WebView background color.
- * @param text Color text in #RRGGBB or #AARRGGBB format.
+ * @param text Color text in RRGGBB or AARRGGBB format.
  * @param out_rgba Destination GTK RGBA value.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
@@ -1356,18 +1356,18 @@ static int kc_wvw_parse_background_color(const char *text, GdkRGBA *out_rgba) {
     size_t length;
     unsigned int parts[4];
 
-    if (!text || !out_rgba || text[0] != '#') {
+    if (!text || !out_rgba) {
         return KC_WVW_ERROR;
     }
 
     length = strlen(text);
-    if (length == 7) {
-        if (sscanf(text + 1, "%2x%2x%2x", &parts[1], &parts[2], &parts[3]) != 3) {
+    if (length == 6) {
+        if (sscanf(text, "%2x%2x%2x", &parts[1], &parts[2], &parts[3]) != 3) {
             return KC_WVW_ERROR;
         }
         parts[0] = 0xff;
-    } else if (length == 9) {
-        if (sscanf(text + 1, "%2x%2x%2x%2x", &parts[0], &parts[1], &parts[2], &parts[3]) != 4) {
+    } else if (length == 8) {
+        if (sscanf(text, "%2x%2x%2x%2x", &parts[0], &parts[1], &parts[2], &parts[3]) != 4) {
             return KC_WVW_ERROR;
         }
     } else {

@@ -28,7 +28,7 @@ Open one URL with explicit title and size:
 Open one URL with a non-white startup background:
 
 ```bash
-./bin/x86_64/linux/wvw --url https://example.com --background "#111111"
+./bin/x86_64/linux/wvw --url https://example.com --background 111111
 ```
 
 Start in borderless mode:
@@ -51,7 +51,7 @@ Start in fullscreen mode:
 | :--- | :--- |
 | `--url <url>` | Set the initial URL. |
 | `--title <title>` | Set the native window title. |
-| `--background <hex>` | Set the WebView background color using `#RRGGBB` or `#AARRGGBB`. |
+| `--background <hex>` | Set the WebView background color using `RRGGBB` or `AARRGGBB`. |
 | `--width <px>` | Set the initial window width. |
 | `--height <px>` | Set the initial window height. |
 | `--fullscreen` | Open the window in fullscreen mode. |
@@ -67,7 +67,7 @@ Start in fullscreen mode:
 | :--- | :--- |
 | `KC_WVW_URL` | Default URL when `--url` is omitted. |
 | `KC_WVW_TITLE` | Default window title. |
-| `KC_WVW_BACKGROUND` | Default WebView background color in `#RRGGBB` or `#AARRGGBB`. |
+| `KC_WVW_BACKGROUND` | Default WebView background color in `RRGGBB` or `AARRGGBB`. |
 | `KC_WVW_WIDTH` | Default window width. |
 | `KC_WVW_HEIGHT` | Default window height. |
 | `KC_WVW_FULLSCREEN` | Default fullscreen flag (`0` or `1`). |
@@ -102,7 +102,7 @@ kc_wvw_options_free(&opts);
 - `kc_wvw_navigate()` loads a new URL.
 - `kc_wvw_close()` releases the window, WebView, and associated resources.
 
-Color input accepts `#RRGGBB` and `#AARRGGBB`. On Windows, alpha must be `00` or `FF` because WebView2 does not support semi-transparent startup colors.
+Color input accepts `RRGGBB` and `AARRGGBB`. On Windows, alpha must be `00` or `FF` because WebView2 does not support semi-transparent startup colors.
 
 ---
 

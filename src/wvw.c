@@ -25,7 +25,7 @@ static void kc_print_help(const char *name) {
     printf("Options:\n");
     printf("    --url <url>       Set initial URL\n");
     printf("    --title <title>   Set window title\n");
-    printf("    --background <hex> Set WebView background color\n");
+    printf("    --background <hex> Set WebView background color as RRGGBB or AARRGGBB\n");
     printf("    --width <px>      Set window width\n");
     printf("    --height <px>     Set window height\n");
     printf("    --fullscreen      Start in fullscreen mode\n");
