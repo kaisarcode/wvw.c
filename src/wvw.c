@@ -33,6 +33,7 @@ static void kc_print_help(const char *name) {
     printf("    --always-on-top   Keep the window above normal windows\n");
     printf("    --click-through   Ignore mouse input on the host window\n");
     printf("    --no-focus        Do not activate the window for keyboard focus\n");
+    printf("    --bridge          Enable NativeBridge with built-in demo methods\n");
     printf("    -h, --help        Show this help\n");
     printf("    -v, --version     Show build version\n");
 }
@@ -70,6 +71,70 @@ static int kc_wvw_parse_int(const char *text, int *out_value) {
 }
 
 /**
+ * Handle NativeBridge method calls from the WebView.
+ * @param ctx Window context.
+ * @param method Method name called from JavaScript.
+ * @param params_json JSON arguments from JavaScript.
+ * @param result_json Output pointer for response JSON.
+ * @param userdata User data pointer.
+ * @return KC_WVW_OK after writing the result.
+ */
+static int kc_cli_bridge_callback(
+    kc_wvw_t *ctx,
+    const char *method,
+    const char *params_json,
+    char **result_json,
+    void *userdata
+) {
+    (void)ctx;
+    (void)userdata;
+    char *buf;
+    int n;
+
+    if (strcmp(method, "ping") == 0) {
+        *result_json = strdup("{\"ok\":true,\"pong\":true}");
+        return KC_WVW_OK;
+    }
+
+    if (strcmp(method, "echo") == 0) {
+        n = snprintf(NULL, 0, "{\"ok\":true,\"echo\":%s}",
+            params_json ? params_json : "null");
+        buf = malloc(n + 1);
+        if (buf) {
+            snprintf(buf, n + 1, "{\"ok\":true,\"echo\":%s}",
+                params_json ? params_json : "null");
+        }
+        *result_json = buf;
+        return KC_WVW_OK;
+    }
+
+    if (strcmp(method, "getStats") == 0) {
+        *result_json = strdup(
+            "{\"ok\":true,\"cpu\":\"23%\",\"mem\":\"6.2/15.6 GB\","
+            "\"bat\":\"78%\",\"net\":\"\xe2\xac\x87 1.2 \xe2\xac\x86 0.4 MB/s\"}"
+        );
+        return KC_WVW_OK;
+    }
+
+    if (strcmp(method, "notifyHost") == 0) {
+        fprintf(stderr, "[wvw bridge] host notification: %s\n",
+            params_json ? params_json : "");
+        *result_json = strdup("{\"ok\":true,\"received\":true}");
+        return KC_WVW_OK;
+    }
+
+    n = snprintf(NULL, 0,
+        "{\"ok\":false,\"error\":\"unknown method '%s'\"}", method);
+    buf = malloc(n + 1);
+    if (buf) {
+        snprintf(buf, n + 1,
+            "{\"ok\":false,\"error\":\"unknown method '%s'\"}", method);
+    }
+    *result_json = buf;
+    return KC_WVW_OK;
+}
+
+/**
  * Execute the command line interface.
  * @param argc Argument count.
  * @param argv Argument vector.
@@ -79,6 +144,7 @@ int main(int argc, char **argv) {
     kc_wvw_options_t opts = kc_wvw_options_default();
     kc_wvw_t *ctx = NULL;
     int i = 1;
+    int bridge_enabled = 0;
 
     kc_wvw_options_load_env(&opts);
 
@@ -138,6 +204,8 @@ int main(int argc, char **argv) {
             opts.click_through = 1;
         } else if (strcmp(argv[i], "--no-focus") == 0) {
             opts.no_focus = 1;
+        } else if (strcmp(argv[i], "--bridge") == 0) {
+            bridge_enabled = 1;
         } else {
             fprintf(stderr, "wvw: unknown option '%s'\n", argv[i]);
             kc_wvw_options_free(&opts);
@@ -156,6 +224,21 @@ int main(int argc, char **argv) {
         fprintf(stderr, "wvw: failed to create window\n");
         kc_wvw_options_free(&opts);
         return 1;
+    }
+
+    if (bridge_enabled) {
+        const char *allowed[] = {
+            "ping", "echo", "getStats", "notifyHost", NULL
+        };
+        kc_wvw_bridge_options_t bopts;
+        bopts.methods = allowed;
+        bopts.method_count = 4;
+        bopts.callback = kc_cli_bridge_callback;
+        bopts.userdata = NULL;
+        bopts.allow_file = 1;
+        bopts.allow_data = 0;
+        bopts.allow_localhost = 0;
+        kc_wvw_enable_bridge(ctx, &bopts);
     }
 
     kc_wvw_listen_signals(ctx);
