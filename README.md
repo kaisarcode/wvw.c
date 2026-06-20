@@ -49,6 +49,12 @@ Open one transparent overlay with the native bridge interactive demo:
 ./bin/x86_64/linux/wvw --url "file:///home/kaisar/work/tests/WVW/interactive.html" --borderless --background 00000000 --always-on-top --bridge
 ```
 
+Open one overlay that minimizes to the tray with a system icon:
+
+```bash
+./bin/x86_64/linux/wvw --url "file:///home/kaisar/work/tests/WVW/hud.html" --borderless --background 00000000 --tray emblem-system
+```
+
 Demo files are available under `tests/WVW/`:
 
 | File | Description |
@@ -74,7 +80,8 @@ Demo files are available under `tests/WVW/`:
 | `--always-on-top` | Keep the window above normal windows. |
 | `--click-through` | Ignore mouse input on the host window. |
 | `--no-focus` | Prevent the window from activating for keyboard focus. |
-| `--bridge` | Enable NativeBridge with built-in demo methods (`ping`, `echo`, `getStats`, `notifyHost`). |
+| `--bridge` | Enable NativeBridge with built-in demo methods (`ping`, `echo`, `getStats`, `notifyHost`, `setTrayMenu`). |
+| `--tray [icon]` | Minimize to system tray on close. Optional icon name (Linux) or `.ico` path (Windows). |
 | `-h`, `--help` | Show help and usage. |
 | `-v`, `--version` | Show build version. |
 
@@ -94,6 +101,7 @@ Demo files are available under `tests/WVW/`:
 | `KC_WVW_ALWAYS_ON_TOP` | Default topmost flag (`0` or `1`). |
 | `KC_WVW_CLICK_THROUGH` | Default click-through flag (`0` or `1`). |
 | `KC_WVW_NO_FOCUS` | Default no-focus flag (`0` or `1`). |
+| `KC_WVW_TRAY` | Enable system tray icon (`1`). |
 | `KC_WVW_BROWSER_ARGS` | Windows WebView2 browser arguments. |
 
 ---
@@ -145,7 +153,7 @@ Bridge rules:
 
 ### CLI built-in methods
 
-The `--bridge` flag registers four demo methods:
+The `--bridge` flag registers five demo methods:
 
 | Method | Description |
 | :--- | :--- |
@@ -153,8 +161,20 @@ The `--bridge` flag registers four demo methods:
 | `echo` | Returns the input parameters wrapped in `{ok:true, echo: ...}`. |
 | `getStats` | Returns static mock system stats (`cpu`, `mem`, `bat`, `net`). |
 | `notifyHost` | Logs the payload to stderr and returns `{ok:true, received:true}`. |
+| `setTrayMenu` | Sets a custom tray context menu from the JS side. Params: `{"items":[{"label":"...","action":"..."}]}`. Action `"quit"` is handled natively. |
 
 Any other method returns `{ok:false, error:"unknown method '...'"}`.
+
+### Bridge built-in methods
+
+These methods are handled by the bridge core itself and are always available (no whitelist needed):
+
+| Method | Description |
+| :--- | :--- |
+| `hideWindow` | Hides the native window. |
+| `showWindow` | Shows and brings the native window to front. |
+| `minimizeWindow` | Minimizes (iconifies) the native window. |
+| `quit` | Closes the window and terminates the process. |
 
 ### Bridge API
 
@@ -251,6 +271,12 @@ int main(void) {
 - `kc_wvw_navigate()` loads a new URL.
 - `kc_wvw_enable_bridge()` injects `window.NativeBridge` into trusted pages.
 - `kc_wvw_post_bridge_event()` emits one `nativebridge` event into the page.
+- `kc_wvw_hide(ctx)` hides the native window.
+- `kc_wvw_show(ctx)` shows and brings the native window to front.
+- `kc_wvw_minimize(ctx)` minimizes (iconifies) the native window.
+- `kc_wvw_tray_init(ctx, tooltip, icon)` creates a system-tray / notification-area icon. `tooltip` is the hover text (may be NULL), `icon` is a GTK icon name, a file path, or NULL for default. Left-click toggles the window, right-click opens a context menu.
+- `kc_wvw_tray_remove()` removes the tray icon.
+- `kc_wvw_tray_set_menu(ctx, items, count)` replaces the tray context menu with an array of `kc_wvw_tray_item_t` entries. Each entry has a `label` (NULL for separator) and an `action` string. Action `"quit"` is handled natively.
 - `kc_wvw_close()` releases the window, WebView, and associated resources.
 
 Color input accepts `RRGGBB` and `AARRGGBB`. On Windows, alpha must be `00` or `FF` because WebView2 does not support semi-transparent startup colors.
@@ -267,6 +293,7 @@ Overlay-oriented flags:
 - `always_on_top` / `--always-on-top` keeps the host window above normal windows.
 - `click_through` / `--click-through` lets mouse input pass through the host window.
 - `no_focus` / `--no-focus` keeps the host window from stealing keyboard focus.
+- `tray` / `--tray` minimizes the window to the system tray instead of closing. Left-click on tray icon toggles visibility; right-click shows a context menu with Show/Hide and Quit.
 
 ---
 

@@ -24,7 +24,10 @@
 #include <windows.h>
 
 #define KC_WVW_CLOSE_MESSAGE (WM_APP + 1)
+#define KC_WVW_TRAY_MSG (WM_APP + 2)
 #define KC_WVW_BRIDGE_MAX_MESSAGE 65536
+#define ID_TRAY_SHOW_HIDE 1001
+#define ID_TRAY_QUIT 1002
 
 typedef HRESULT (STDAPICALLTYPE *kc_wvw_create_environment_fn)(PCWSTR, PCWSTR, ICoreWebView2EnvironmentOptions *, ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *);
 typedef HRESULT (STDAPICALLTYPE *kc_wvw_get_version_fn)(PCWSTR, LPWSTR *);
@@ -79,6 +82,10 @@ struct kc_wvw {
     kc_wvw_init_state_t init_state;
     char *pending_url;
     kc_wvw_bridge_state_t bridge;
+    int tray_enabled;
+    HICON tray_hicon;
+    kc_wvw_tray_item_t *tray_items;
+    int tray_count;
 };
 
 static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *url);
@@ -1064,6 +1071,35 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         return response;
     }
 
+    if (strcmp(method, "hideWindow") == 0) {
+        if (ctx->hwnd) ShowWindow(ctx->hwnd, SW_HIDE);
+        result = kc_wvw_strdup("{\"ok\":true}");
+        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        free(id); free(method); free(params); free(result);
+        return response;
+    }
+    if (strcmp(method, "showWindow") == 0) {
+        if (ctx->hwnd) ShowWindow(ctx->hwnd, SW_SHOW);
+        result = kc_wvw_strdup("{\"ok\":true}");
+        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        free(id); free(method); free(params); free(result);
+        return response;
+    }
+    if (strcmp(method, "minimizeWindow") == 0) {
+        if (ctx->hwnd) ShowWindow(ctx->hwnd, SW_MINIMIZE);
+        result = kc_wvw_strdup("{\"ok\":true}");
+        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        free(id); free(method); free(params); free(result);
+        return response;
+    }
+    if (strcmp(method, "quit") == 0) {
+        kc_wvw_close(ctx);
+        result = kc_wvw_strdup("{\"ok\":true}");
+        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        free(id); free(method); free(params); free(result);
+        return response;
+    }
+
     if (!kc_wvw_bridge_method_allowed(&ctx->bridge, method)) {
         error = kc_wvw_bridge_error_object("METHOD_NOT_ALLOWED", "Bridge method is not allowed.");
         response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
@@ -1682,11 +1718,86 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
         }
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     case WM_CLOSE:
+        if (ctx && ctx->tray_enabled) {
+            ShowWindow(ctx->hwnd, SW_HIDE);
+            return 0;
+        }
         kc_wvw_request_close(ctx);
         return 0;
     case KC_WVW_CLOSE_MESSAGE:
         kc_wvw_request_close(ctx);
         return 0;
+    case KC_WVW_TRAY_MSG:
+        if (lparam == WM_LBUTTONUP) {
+            if (IsWindowVisible(ctx ? ctx->hwnd : NULL)) {
+                ShowWindow(ctx->hwnd, SW_HIDE);
+            } else {
+                ShowWindow(ctx->hwnd, SW_SHOW);
+                SetForegroundWindow(ctx->hwnd);
+            }
+            return 0;
+        }
+        if (lparam == WM_RBUTTONUP) {
+            HMENU menu = CreatePopupMenu();
+            if (menu) {
+                int i;
+                wchar_t wlabel[256];
+                if (ctx && ctx->tray_count > 0 && ctx->tray_items) {
+                    for (i = 0; i < ctx->tray_count; i++) {
+                        if (!ctx->tray_items[i].label) {
+                            AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+                        } else {
+                            MultiByteToWideChar(CP_UTF8, 0,
+                                ctx->tray_items[i].label, -1, wlabel, 256);
+                            wlabel[255] = L'\0';
+                            AppendMenuW(menu, MF_STRING, (UINT_PTR)i, wlabel);
+                        }
+                    }
+                } else {
+                    AppendMenuW(menu, MF_STRING, 0, L"Show/Hide");
+                    AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+                    AppendMenuW(menu, MF_STRING, 1, L"Quit");
+                }
+                SetForegroundWindow(ctx ? ctx->hwnd : NULL);
+                TrackPopupMenu(menu, TPM_RIGHTBUTTON, 0, 0, 0, ctx ? ctx->hwnd : NULL, NULL);
+                DestroyMenu(menu);
+            }
+            return 0;
+        }
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    case WM_COMMAND: {
+        int id = (int)LOWORD(wparam);
+        if (ctx && ctx->tray_count > 0 && ctx->tray_items && id >= 0 && id < ctx->tray_count) {
+            const char *action = ctx->tray_items[id].action;
+            if (action && strcmp(action, "quit") == 0) {
+                kc_wvw_tray_remove(ctx);
+                kc_wvw_request_close(ctx);
+            } else if (action) {
+                char buf[128];
+                int n = snprintf(buf, sizeof(buf),
+                    "{\"type\":\"tray_menu\",\"action\":\"%s\"}", action);
+                if (n > 0 && n < (int)sizeof(buf)) {
+                    kc_wvw_post_bridge_event(ctx, buf);
+                }
+            }
+            return 0;
+        }
+        if (ctx && id == 0) {
+            if (IsWindowVisible(ctx->hwnd)) {
+                ShowWindow(ctx->hwnd, SW_HIDE);
+            } else {
+                ShowWindow(ctx->hwnd, SW_SHOW);
+                SetForegroundWindow(ctx->hwnd);
+            }
+            return 0;
+        }
+        if (ctx && id == 1) {
+            kc_wvw_tray_remove(ctx);
+            kc_wvw_request_close(ctx);
+            return 0;
+        }
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
     case WM_DESTROY:
         if (ctx) {
             ctx->running = 0;
@@ -2159,6 +2270,10 @@ int kc_wvw_close(kc_wvw_t *ctx) {
         return KC_WVW_OK;
     }
 
+    if (ctx->tray_enabled) {
+        kc_wvw_tray_remove(ctx);
+    }
+
     ctx->closing = 1;
     if (ctx->controller) {
         ICoreWebView2Controller_Close(ctx->controller);
@@ -2190,6 +2305,14 @@ int kc_wvw_close(kc_wvw_t *ctx) {
 
     free(ctx->pending_url);
     free(ctx->signal_handlers);
+    if (ctx->tray_items) {
+        int i;
+        for (i = 0; i < ctx->tray_count; i++) {
+            free((void *)ctx->tray_items[i].label);
+            free((void *)ctx->tray_items[i].action);
+        }
+        free(ctx->tray_items);
+    }
     kc_wvw_bridge_state_free(&ctx->bridge);
     kc_wvw_options_free(&ctx->opts);
     if (ctx->com_initialized) {
@@ -2310,6 +2433,192 @@ int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json) {
     return kc_wvw_bridge_post_json(ctx, json);
 }
 
+/**
+ * Create the Windows system-tray icon.
+ * @param ctx Window context.
+ * @param tooltip Tooltip text.
+ * @param icon Path to .ico file, or NULL for default.
+ * @return KC_WVW_OK or KC_WVW_ERROR.
+ */
+static int kc_wvw_windows_tray_init(kc_wvw_t *ctx, const char *tooltip, const char *icon) {
+    NOTIFYICONDATAW nid;
+    wchar_t *wtip;
+    wchar_t *wicon;
+    int wtip_len;
+
+    if (!ctx) {
+        return KC_WVW_ERROR;
+    }
+
+    if (icon && !ctx->tray_hicon) {
+        wicon = kc_wvw_utf16_from_utf8(icon);
+        if (wicon) {
+            ctx->tray_hicon = (HICON)LoadImageW(NULL, wicon, IMAGE_ICON, 0, 0,
+                LR_LOADFROMFILE | LR_DEFAULTSIZE);
+            free(wicon);
+        }
+    }
+
+    memset(&nid, 0, sizeof(nid));
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = ctx->hwnd;
+    nid.uID = 1;
+    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_SHOWTIP;
+    nid.uCallbackMessage = KC_WVW_TRAY_MSG;
+    nid.hIcon = ctx->tray_hicon ? ctx->tray_hicon : LoadIconW(NULL, (LPCWSTR)IDI_APPLICATION);
+
+    if (tooltip) {
+        wtip_len = MultiByteToWideChar(CP_UTF8, 0, tooltip, -1, NULL, 0);
+        if (wtip_len > 0) {
+            wtip = (wchar_t *)malloc(wtip_len * sizeof(wchar_t));
+            if (wtip) {
+                MultiByteToWideChar(CP_UTF8, 0, tooltip, -1, wtip, wtip_len);
+                wcsncpy(nid.szTip, wtip, 127);
+                nid.szTip[127] = L'\0';
+                free(wtip);
+            }
+        }
+    }
+
+    if (!Shell_NotifyIconW(NIM_ADD, &nid)) {
+        return KC_WVW_ERROR;
+    }
+
+    ctx->tray_enabled = 1;
+    if (!ctx->tray_hicon) {
+        ctx->tray_hicon = nid.hIcon;
+    }
+    return KC_WVW_OK;
+}
+
+/**
+ * Remove the Windows system-tray icon.
+ * @param ctx Window context.
+ * @return KC_WVW_OK or KC_WVW_ERROR.
+ */
+static int kc_wvw_windows_tray_remove(kc_wvw_t *ctx) {
+    NOTIFYICONDATAW nid;
+
+    if (!ctx || !ctx->tray_enabled) {
+        return KC_WVW_ERROR;
+    }
+
+    memset(&nid, 0, sizeof(nid));
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = ctx->hwnd;
+    nid.uID = 1;
+
+    Shell_NotifyIconW(NIM_DELETE, &nid);
+    ctx->tray_enabled = 0;
+
+    if (ctx->tray_hicon) {
+        DestroyIcon(ctx->tray_hicon);
+        ctx->tray_hicon = NULL;
+    }
+
+    return KC_WVW_OK;
+}
+
+/**
+ * Create a system tray / notification-area icon for the window.
+ * @param ctx Window context.
+ * @param tooltip Tooltip text for the icon (may be NULL).
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_tray_init(kc_wvw_t *ctx, const char *tooltip, const char *icon) {
+    if (!ctx) {
+        return KC_WVW_ERROR;
+    }
+    return kc_wvw_windows_tray_init(ctx, tooltip, icon);
+}
+
+/**
+ * Remove the tray icon if one was created.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_tray_remove(kc_wvw_t *ctx) {
+    if (!ctx) {
+        return KC_WVW_ERROR;
+    }
+    return kc_wvw_windows_tray_remove(ctx);
+}
+
+/**
+ * Replace the tray context menu with custom items.
+ * @param ctx Window context.
+ * @param items Array of menu items.
+ * @param count Number of items.
+ * @return KC_WVW_OK or KC_WVW_ERROR.
+ */
+int kc_wvw_tray_set_menu(kc_wvw_t *ctx, const kc_wvw_tray_item_t *items, int count) {
+    kc_wvw_tray_item_t *copy;
+    int i;
+
+    if (!ctx) {
+        return KC_WVW_ERROR;
+    }
+    if (!items || count <= 0) {
+        free(ctx->tray_items);
+        ctx->tray_items = NULL;
+        ctx->tray_count = 0;
+        return KC_WVW_OK;
+    }
+
+    copy = (kc_wvw_tray_item_t *)calloc(count, sizeof(kc_wvw_tray_item_t));
+    if (!copy) {
+        return KC_WVW_ERROR;
+    }
+    for (i = 0; i < count; i++) {
+        copy[i].label = items[i].label ? kc_wvw_strdup(items[i].label) : NULL;
+        copy[i].action = items[i].action ? kc_wvw_strdup(items[i].action) : NULL;
+    }
+
+    free(ctx->tray_items);
+    ctx->tray_items = copy;
+    ctx->tray_count = count;
+    return KC_WVW_OK;
+}
+
+/**
+ * Hide the window.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_hide(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->hwnd) {
+        return KC_WVW_ERROR;
+    }
+    ShowWindow(ctx->hwnd, SW_HIDE);
+    return KC_WVW_OK;
+}
+
+/**
+ * Show the window.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_show(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->hwnd) {
+        return KC_WVW_ERROR;
+    }
+    ShowWindow(ctx->hwnd, SW_SHOW);
+    return KC_WVW_OK;
+}
+
+/**
+ * Minimize (iconify) the window.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_minimize(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->hwnd) {
+        return KC_WVW_ERROR;
+    }
+    ShowWindow(ctx->hwnd, SW_MINIMIZE);
+    return KC_WVW_OK;
+}
+
 #else
 
 #define _POSIX_C_SOURCE 200809L
@@ -2363,6 +2672,10 @@ struct kc_wvw {
     GtkWidget *window;
     WebKitWebView *web_view;
     kc_wvw_bridge_state_t bridge;
+    int tray_enabled;
+    GtkStatusIcon *tray_icon;
+    kc_wvw_tray_item_t *tray_items;
+    int tray_count;
 };
 
 static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *url);
@@ -2914,6 +3227,38 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         return response;
     }
 
+    if (strcmp(method, "hideWindow") == 0) {
+        if (ctx->window) gtk_widget_hide(ctx->window);
+        result = kc_wvw_strdup("{\"ok\":true}");
+        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        free(id); free(method); free(params); free(result);
+        return response;
+    }
+    if (strcmp(method, "showWindow") == 0) {
+        if (ctx->window) {
+            gtk_widget_show_all(ctx->window);
+            gtk_window_present(GTK_WINDOW(ctx->window));
+        }
+        result = kc_wvw_strdup("{\"ok\":true}");
+        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        free(id); free(method); free(params); free(result);
+        return response;
+    }
+    if (strcmp(method, "minimizeWindow") == 0) {
+        if (ctx->window) gtk_window_iconify(GTK_WINDOW(ctx->window));
+        result = kc_wvw_strdup("{\"ok\":true}");
+        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        free(id); free(method); free(params); free(result);
+        return response;
+    }
+    if (strcmp(method, "quit") == 0) {
+        kc_wvw_close(ctx);
+        result = kc_wvw_strdup("{\"ok\":true}");
+        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        free(id); free(method); free(params); free(result);
+        return response;
+    }
+
     if (!kc_wvw_bridge_method_allowed(&ctx->bridge, method)) {
         error = kc_wvw_bridge_error_object("METHOD_NOT_ALLOWED", "Bridge method is not allowed.");
         response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
@@ -3084,6 +3429,25 @@ static void kc_wvw_linux_destroy(GtkWidget *widget, gpointer userdata) {
 }
 
 /**
+ * Intercept the window close button to minimize to tray when enabled.
+ * @param widget The window widget.
+ * @param event GDK event.
+ * @param userdata Window context.
+ * @return TRUE to prevent the destroy, FALSE to allow.
+ */
+static gboolean kc_wvw_linux_delete_event(GtkWidget *widget, GdkEvent *event, gpointer userdata) {
+    kc_wvw_t *ctx = (kc_wvw_t *)userdata;
+    (void)widget;
+    (void)event;
+
+    if (ctx && ctx->tray_enabled && ctx->tray_icon) {
+        gtk_widget_hide(ctx->window);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/**
  * Handle one message received from the injected NativeBridge runtime.
  * @param manager User content manager.
  * @param js_result JavaScript result.
@@ -3219,6 +3583,7 @@ static int kc_wvw_linux_create_window(kc_wvw_t *ctx) {
     }
 
     gtk_container_add(GTK_CONTAINER(ctx->window), GTK_WIDGET(ctx->web_view));
+    g_signal_connect(ctx->window, "delete-event", G_CALLBACK(kc_wvw_linux_delete_event), ctx);
     g_signal_connect(ctx->window, "destroy", G_CALLBACK(kc_wvw_linux_destroy), ctx);
     gtk_widget_show_all(ctx->window);
     kc_wvw_linux_apply_window_modes(ctx);
@@ -3458,10 +3823,22 @@ int kc_wvw_close(kc_wvw_t *ctx) {
         return KC_WVW_OK;
     }
 
+    if (ctx->tray_enabled) {
+        kc_wvw_tray_remove(ctx);
+    }
+
     if (ctx->window && GTK_IS_WIDGET(ctx->window)) {
         gtk_widget_destroy(ctx->window);
     }
 
+    if (ctx->tray_items) {
+        int i;
+        for (i = 0; i < ctx->tray_count; i++) {
+            free((void *)ctx->tray_items[i].label);
+            free((void *)ctx->tray_items[i].action);
+        }
+        free(ctx->tray_items);
+    }
     free(ctx->signal_handlers);
     kc_wvw_bridge_state_free(&ctx->bridge);
     kc_wvw_options_free(&ctx->opts);
@@ -3542,5 +3919,308 @@ int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
 int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json) {
     return kc_wvw_bridge_post_json(ctx, json);
 }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
+/**
+ * Toggle the window visibility between hidden and shown.
+ * @param ctx Window context.
+ * @return None.
+ */
+static void kc_wvw_linux_toggle_window(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->window) {
+        return;
+    }
+    if (gtk_widget_get_visible(ctx->window)) {
+        gtk_widget_hide(ctx->window);
+    } else {
+        gtk_widget_show_all(ctx->window);
+        gtk_window_present(GTK_WINDOW(ctx->window));
+    }
+}
+
+/**
+ * Open the "Quit" menu action on the tray context menu.
+ * @param item Menu item.
+ * @param userdata Window context.
+ * @return None.
+ */
+static void kc_wvw_linux_tray_quit(GtkMenuItem *item, gpointer userdata) {
+    kc_wvw_t *ctx = (kc_wvw_t *)userdata;
+    (void)item;
+    if (ctx) {
+        gtk_status_icon_set_visible(ctx->tray_icon, FALSE);
+        kc_wvw_close(ctx);
+    }
+}
+
+/**
+ * Open the "Show/Hide" menu action on the tray context menu.
+ * @param item Menu item.
+ * @param userdata Window context.
+ * @return None.
+ */
+static void kc_wvw_linux_tray_toggle(GtkMenuItem *item, gpointer userdata) {
+    kc_wvw_t *ctx = (kc_wvw_t *)userdata;
+    (void)item;
+    kc_wvw_linux_toggle_window(ctx);
+}
+
+/**
+ * Handle a click on a custom tray menu item; post a bridge event.
+ * @param item Menu item.
+ * @param userdata Window context.
+ * @return None.
+ */
+static void kc_wvw_linux_tray_item_clicked(GtkMenuItem *item, gpointer userdata) {
+    kc_wvw_t *ctx = (kc_wvw_t *)userdata;
+    const char *action;
+
+    if (!ctx) return;
+
+    (void)item;
+
+    action = (const char *)g_object_get_data(G_OBJECT(item), "tray-action");
+    if (action) {
+        char buf[128];
+        int n = snprintf(buf, sizeof(buf),
+            "{\"type\":\"tray_menu\",\"action\":\"%s\"}", action);
+        if (n > 0 && n < (int)sizeof(buf)) {
+            kc_wvw_post_bridge_event(ctx, buf);
+        }
+    }
+}
+
+/**
+ * Build and show the right-click context menu for the tray icon.
+ * If custom items were set via kc_wvw_tray_set_menu(), use those;
+ * otherwise fall back to the default Show/Hide and Quit items.
+ * @param icon Status icon.
+ * @param button Mouse button.
+ * @param activate_time Event time.
+ * @param userdata Window context.
+ * @return None.
+ */
+static void kc_wvw_linux_tray_menu(GtkStatusIcon *icon, guint button, guint activate_time, gpointer userdata) {
+    kc_wvw_t *ctx = (kc_wvw_t *)userdata;
+    GtkWidget *menu;
+    GtkWidget *item;
+    int i;
+
+    (void)icon;
+    (void)button;
+
+    if (!ctx) {
+        return;
+    }
+
+    menu = gtk_menu_new();
+
+    if (ctx->tray_count > 0 && ctx->tray_items) {
+        for (i = 0; i < ctx->tray_count; i++) {
+            if (!ctx->tray_items[i].label) {
+                item = gtk_separator_menu_item_new();
+            } else {
+                item = gtk_menu_item_new_with_label(ctx->tray_items[i].label);
+                g_object_set_data(G_OBJECT(item), "tray-action",
+                    (gpointer)ctx->tray_items[i].action);
+                if (ctx->tray_items[i].action
+                    && strcmp(ctx->tray_items[i].action, "quit") == 0) {
+                    g_signal_connect(item, "activate",
+                        G_CALLBACK(kc_wvw_linux_tray_quit), ctx);
+                } else {
+                    g_signal_connect(item, "activate",
+                        G_CALLBACK(kc_wvw_linux_tray_item_clicked), ctx);
+                }
+            }
+            gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+        }
+    } else {
+        item = gtk_menu_item_new_with_label("Show/Hide");
+        g_signal_connect(item, "activate", G_CALLBACK(kc_wvw_linux_tray_toggle), ctx);
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+
+        item = gtk_separator_menu_item_new();
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+
+        item = gtk_menu_item_new_with_label("Quit");
+        g_signal_connect(item, "activate", G_CALLBACK(kc_wvw_linux_tray_quit), ctx);
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+    }
+
+    gtk_widget_show_all(menu);
+    gtk_menu_popup(GTK_MENU(menu), NULL, NULL, gtk_status_icon_position_menu, icon, button, activate_time);
+}
+
+/**
+ * Left-click handler for the tray icon.
+ * @param icon Status icon.
+ * @param userdata Window context.
+ * @return None.
+ */
+static void kc_wvw_linux_tray_activate(GtkStatusIcon *icon, gpointer userdata) {
+    kc_wvw_t *ctx = (kc_wvw_t *)userdata;
+    (void)icon;
+    kc_wvw_linux_toggle_window(ctx);
+}
+
+/**
+ * Create the Linux system-tray icon.
+ * @param ctx Window context.
+ * @param tooltip Tooltip text.
+ * @param icon Icon name or file path. NULL uses a default icon.
+ * @return KC_WVW_OK or KC_WVW_ERROR.
+ */
+static int kc_wvw_linux_tray_init(kc_wvw_t *ctx, const char *tooltip, const char *icon) {
+    if (!ctx) {
+        return KC_WVW_ERROR;
+    }
+
+    if (icon) {
+        if (strchr(icon, '/')) {
+            ctx->tray_icon = gtk_status_icon_new_from_file(icon);
+        } else {
+            ctx->tray_icon = gtk_status_icon_new_from_icon_name(icon);
+        }
+    }
+    if (!ctx->tray_icon) {
+        ctx->tray_icon = gtk_status_icon_new_from_icon_name("emblem-system");
+    }
+    if (!ctx->tray_icon) {
+        return KC_WVW_ERROR;
+    }
+
+    g_signal_connect(ctx->tray_icon, "activate", G_CALLBACK(kc_wvw_linux_tray_activate), ctx);
+    g_signal_connect(ctx->tray_icon, "popup-menu", G_CALLBACK(kc_wvw_linux_tray_menu), ctx);
+
+    if (tooltip) {
+        gtk_status_icon_set_tooltip_text(ctx->tray_icon, tooltip);
+    }
+
+    gtk_status_icon_set_visible(ctx->tray_icon, TRUE);
+    ctx->tray_enabled = 1;
+    return KC_WVW_OK;
+}
+
+/**
+ * Remove the Linux tray icon.
+ * @param ctx Window context.
+ * @return KC_WVW_OK or KC_WVW_ERROR.
+ */
+static int kc_wvw_linux_tray_remove(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->tray_enabled || !ctx->tray_icon) {
+        return KC_WVW_ERROR;
+    }
+
+    gtk_status_icon_set_visible(ctx->tray_icon, FALSE);
+    g_object_unref(ctx->tray_icon);
+    ctx->tray_icon = NULL;
+    ctx->tray_enabled = 0;
+    return KC_WVW_OK;
+}
+
+/**
+ * Create a system tray / notification-area icon for the window.
+ * @param ctx Window context.
+ * @param tooltip Tooltip text for the icon (may be NULL).
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_tray_init(kc_wvw_t *ctx, const char *tooltip, const char *icon) {
+    if (!ctx) {
+        return KC_WVW_ERROR;
+    }
+    return kc_wvw_linux_tray_init(ctx, tooltip, icon);
+}
+
+/**
+ * Remove the tray icon if one was created.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_tray_remove(kc_wvw_t *ctx) {
+    if (!ctx) {
+        return KC_WVW_ERROR;
+    }
+    return kc_wvw_linux_tray_remove(ctx);
+}
+
+/**
+ * Replace the tray context menu with custom items.
+ * @param ctx Window context.
+ * @param items Array of menu items.
+ * @param count Number of items.
+ * @return KC_WVW_OK or KC_WVW_ERROR.
+ */
+int kc_wvw_tray_set_menu(kc_wvw_t *ctx, const kc_wvw_tray_item_t *items, int count) {
+    kc_wvw_tray_item_t *copy;
+    int i;
+
+    if (!ctx) {
+        return KC_WVW_ERROR;
+    }
+    if (!items || count <= 0) {
+        free(ctx->tray_items);
+        ctx->tray_items = NULL;
+        ctx->tray_count = 0;
+        return KC_WVW_OK;
+    }
+
+    copy = (kc_wvw_tray_item_t *)calloc(count, sizeof(kc_wvw_tray_item_t));
+    if (!copy) {
+        return KC_WVW_ERROR;
+    }
+    for (i = 0; i < count; i++) {
+        copy[i].label = items[i].label ? kc_wvw_strdup(items[i].label) : NULL;
+        copy[i].action = items[i].action ? kc_wvw_strdup(items[i].action) : NULL;
+    }
+
+    free(ctx->tray_items);
+    ctx->tray_items = copy;
+    ctx->tray_count = count;
+    return KC_WVW_OK;
+}
+
+/**
+ * Hide the window.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_hide(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->window) {
+        return KC_WVW_ERROR;
+    }
+    gtk_widget_hide(ctx->window);
+    return KC_WVW_OK;
+}
+
+/**
+ * Show the window.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_show(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->window) {
+        return KC_WVW_ERROR;
+    }
+    gtk_widget_show_all(ctx->window);
+    gtk_window_present(GTK_WINDOW(ctx->window));
+    return KC_WVW_OK;
+}
+
+/**
+ * Minimize (iconify) the window.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_minimize(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->window) {
+        return KC_WVW_ERROR;
+    }
+    gtk_window_iconify(GTK_WINDOW(ctx->window));
+    return KC_WVW_OK;
+}
+
+#pragma GCC diagnostic pop
 
 #endif

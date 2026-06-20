@@ -34,6 +34,8 @@ static void kc_print_help(const char *name) {
     printf("    --click-through   Ignore mouse input on the host window\n");
     printf("    --no-focus        Do not activate the window for keyboard focus\n");
     printf("    --bridge          Enable NativeBridge with built-in demo methods\n");
+    printf("    --tray [icon]     Minimize to system tray on close. Optional icon name (Linux) or\n");
+    printf("                     .ico path (Windows). Defaults to a system icon.\n");
     printf("    -h, --help        Show this help\n");
     printf("    -v, --version     Show build version\n");
 }
@@ -123,6 +125,54 @@ static int kc_cli_bridge_callback(
         return KC_WVW_OK;
     }
 
+    if (strcmp(method, "setTrayMenu") == 0 && params_json) {
+        kc_wvw_tray_item_t items[64];
+        int count = 0;
+        const char *p = params_json;
+        while (count < 64 && (p = strstr(p, "\"label\"")) != NULL) {
+            char label[256], action[256];
+            const char *start, *end;
+            size_t len;
+            p = strchr(p, ':');
+            if (!p) break;
+            p++;
+            while (*p == ' ' || *p == '\t') p++;
+            if (*p != '"') break;
+            p++;
+            start = p;
+            while (*p && *p != '"') p++;
+            end = p;
+            if (start >= end) break;
+            len = end - start;
+            if (len >= sizeof(label)) len = sizeof(label) - 1;
+            memcpy(label, start, len);
+            label[len] = '\0';
+            p = strstr(p, "\"action\"");
+            if (!p) break;
+            p = strchr(p, ':');
+            if (!p) break;
+            p++;
+            while (*p == ' ' || *p == '\t') p++;
+            if (*p != '"') break;
+            p++;
+            start = p;
+            while (*p && *p != '"') p++;
+            end = p;
+            if (start >= end) break;
+            len = end - start;
+            if (len >= sizeof(action)) len = sizeof(action) - 1;
+            memcpy(action, start, len);
+            action[len] = '\0';
+            items[count].label = label;
+            items[count].action = action;
+            count++;
+            p++;
+        }
+        kc_wvw_tray_set_menu(ctx, items, count);
+        *result_json = strdup("{\"ok\":true}");
+        return KC_WVW_OK;
+    }
+
     n = snprintf(NULL, 0,
         "{\"ok\":false,\"error\":\"unknown method '%s'\"}", method);
     buf = malloc(n + 1);
@@ -145,6 +195,8 @@ int main(int argc, char **argv) {
     kc_wvw_t *ctx = NULL;
     int i = 1;
     int bridge_enabled = 0;
+    int tray_enabled = 0;
+    char *tray_icon = NULL;
 
     kc_wvw_options_load_env(&opts);
 
@@ -206,6 +258,13 @@ int main(int argc, char **argv) {
             opts.no_focus = 1;
         } else if (strcmp(argv[i], "--bridge") == 0) {
             bridge_enabled = 1;
+        } else if (strcmp(argv[i], "--tray") == 0) {
+            tray_enabled = 1;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                i++;
+                free(tray_icon);
+                tray_icon = strdup(argv[i]);
+            }
         } else {
             fprintf(stderr, "wvw: unknown option '%s'\n", argv[i]);
             kc_wvw_options_free(&opts);
@@ -217,28 +276,41 @@ int main(int argc, char **argv) {
     if (!opts.url || !*opts.url) {
         fprintf(stderr, "wvw: missing URL\n");
         kc_wvw_options_free(&opts);
+        free(tray_icon);
         return 1;
     }
 
     if (kc_wvw_open(&ctx, &opts) != KC_WVW_OK) {
         fprintf(stderr, "wvw: failed to create window\n");
         kc_wvw_options_free(&opts);
+        free(tray_icon);
         return 1;
     }
 
     if (bridge_enabled) {
         const char *allowed[] = {
-            "ping", "echo", "getStats", "notifyHost", NULL
+            "ping", "echo", "getStats", "notifyHost", "setTrayMenu",
+            NULL
         };
         kc_wvw_bridge_options_t bopts;
         bopts.methods = allowed;
-        bopts.method_count = 4;
+        bopts.method_count = 5;
         bopts.callback = kc_cli_bridge_callback;
         bopts.userdata = NULL;
         bopts.allow_file = 1;
         bopts.allow_data = 0;
         bopts.allow_localhost = 0;
         kc_wvw_enable_bridge(ctx, &bopts);
+    }
+
+    {
+        const char *tray_env = getenv("KC_WVW_TRAY");
+        if (tray_env && tray_env[0] == '1') {
+            tray_enabled = 1;
+        }
+    }
+    if (tray_enabled) {
+        kc_wvw_tray_init(ctx, opts.title ? opts.title : "wvw", tray_icon);
     }
 
     kc_wvw_listen_signals(ctx);
@@ -258,5 +330,6 @@ int main(int argc, char **argv) {
 
     kc_wvw_close(ctx);
     kc_wvw_options_free(&opts);
+    free(tray_icon);
     return 0;
 }

@@ -167,6 +167,60 @@ int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts);
  */
 int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json);
 
+/**
+ * Create a system tray / notification-area icon for the window.
+ * @param ctx Window context.
+ * @param tooltip Tooltip text for the icon (may be NULL).
+ * @param icon Icon name (Linux) or .ico file path. NULL uses a default icon.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_tray_init(kc_wvw_t *ctx, const char *tooltip, const char *icon);
+
+/**
+ * Remove the tray icon if one was created.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_tray_remove(kc_wvw_t *ctx);
+
+/**
+ * Hide the window.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_hide(kc_wvw_t *ctx);
+
+/**
+ * Show the window.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_show(kc_wvw_t *ctx);
+
+/**
+ * Minimize (iconify) the window.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_minimize(kc_wvw_t *ctx);
+
+/**
+ * One entry in a tray context menu.
+ */
+typedef struct {
+    const char *label;
+    const char *action;
+} kc_wvw_tray_item_t;
+
+/**
+ * Replace the tray context menu with custom items.
+ * @param ctx Window context.
+ * @param items Array of menu items.
+ * @param count Number of items in the array.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_tray_set_menu(kc_wvw_t *ctx, const kc_wvw_tray_item_t *items, int count);
+
 #ifdef __cplusplus
 }
 #endif
