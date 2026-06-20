@@ -88,7 +88,7 @@ struct kc_wvw {
     int tray_count;
 };
 
-static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *url);
+static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridge, const char *url);
 static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge);
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src);
 static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge, const char *sender_expr, const char *receiver_setup);
@@ -754,12 +754,81 @@ static int kc_wvw_bridge_method_valid(const char *method) {
 }
 
 /**
+ * Extract the origin scheme and host from a URL string.
+ * @param url Candidate URL.
+ * @return Newly allocated origin string or NULL.
+ */
+static char *kc_wvw_extract_origin(const char *url) {
+    const char *p;
+    const char *end;
+    size_t len;
+
+    if (!url) {
+        return NULL;
+    }
+    p = strstr(url, "://");
+    if (!p) {
+        return NULL;
+    }
+    p += 3;
+    end = p;
+    while (*end && *end != '/' && *end != '?' && *end != '#') {
+        end++;
+    }
+    len = (size_t)(end - url);
+    return kc_wvw_strndup_range(url, len);
+}
+
+/**
+ * Search for an origin string within a space-separated list of origins.
+ * @param origin Target origin.
+ * @param list Space-separated list of origins.
+ * @return Non-zero if found, otherwise zero.
+ */
+static int kc_wvw_is_origin_in_list(const char *origin, const char *list) {
+    const char *p;
+    const char *next;
+    size_t len;
+    size_t origin_len;
+
+    if (!origin || !list) {
+        return 0;
+    }
+    origin_len = strlen(origin);
+    p = list;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+        next = p;
+        while (*next && *next != ' ' && *next != '\t' && *next != '\r' && *next != '\n') {
+            next++;
+        }
+        len = (size_t)(next - p);
+        if (len == origin_len && strncmp(p, origin, len) == 0) {
+            return 1;
+        }
+        p = next;
+    }
+    return 0;
+}
+
+/**
  * Return whether one URL is trusted for the current bridge policy.
+ * @param ctx Window context.
  * @param bridge Bridge state.
  * @param url Candidate URL.
  * @return Non-zero when the URL is accepted, otherwise zero.
  */
-static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *url) {
+static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridge, const char *url) {
+    char *url_origin;
+    char *init_origin;
+    const char *env_trusted;
+    int trusted = 0;
+
     if (!bridge || !bridge->callback || !url) {
         return 0;
     }
@@ -774,7 +843,28 @@ static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *
         return 1;
     }
 
-    return 0;
+    url_origin = kc_wvw_extract_origin(url);
+    if (!url_origin) {
+        return 0;
+    }
+
+    env_trusted = getenv("TRUSTED_ORIGINS");
+    if (env_trusted && kc_wvw_is_origin_in_list(url_origin, env_trusted)) {
+        trusted = 1;
+    }
+
+    if (!trusted && ctx && ctx->opts.url) {
+        init_origin = kc_wvw_extract_origin(ctx->opts.url);
+        if (init_origin) {
+            if (strcmp(url_origin, init_origin) == 0) {
+                trusted = 1;
+            }
+            free(init_origin);
+        }
+    }
+
+    free(url_origin);
+    return trusted;
 }
 
 /**
@@ -1151,7 +1241,7 @@ static HRESULT STDMETHODCALLTYPE kc_wvw_navigation_invoke(ICoreWebView2Navigatio
     if (SUCCEEDED(ICoreWebView2NavigationStartingEventArgs_get_Uri(args, &uri)) && uri) {
         utf8[0] = '\0';
         WideCharToMultiByte(CP_UTF8, 0, uri, -1, utf8, sizeof(utf8), NULL, NULL);
-        if (!kc_wvw_bridge_url_trusted(&handler->ctx->bridge, utf8)) {
+        if (!kc_wvw_bridge_url_trusted(handler->ctx, &handler->ctx->bridge, utf8)) {
             ICoreWebView2NavigationStartingEventArgs_put_Cancel(args, TRUE);
         }
         CoTaskMemFree(uri);
@@ -1753,6 +1843,10 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
                             AppendMenuW(menu, MF_STRING, (UINT_PTR)i, wlabel);
                         }
                     }
+                    AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+                    MultiByteToWideChar(CP_UTF8, 0, "Quit", -1, wlabel, 256);
+                    wlabel[255] = L'\0';
+                    AppendMenuW(menu, MF_STRING, (UINT_PTR)ctx->tray_count, wlabel);
                 } else {
                     AppendMenuW(menu, MF_STRING, 0, L"Show/Hide");
                     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
@@ -1780,6 +1874,11 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
                     kc_wvw_post_bridge_event(ctx, buf);
                 }
             }
+            return 0;
+        }
+        if (ctx && ctx->tray_count > 0 && ctx->tray_items && id == ctx->tray_count) {
+            kc_wvw_tray_remove(ctx);
+            kc_wvw_request_close(ctx);
             return 0;
         }
         if (ctx && id == 0) {
@@ -2365,7 +2464,7 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
     if (!ctx || !url) {
         return KC_WVW_ERROR;
     }
-    if (ctx->bridge.callback && !kc_wvw_bridge_url_trusted(&ctx->bridge, url)) {
+    if (ctx->bridge.callback && !kc_wvw_bridge_url_trusted(ctx, &ctx->bridge, url)) {
         return KC_WVW_ERROR;
     }
 
@@ -2407,7 +2506,7 @@ int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
     if (kc_wvw_bridge_state_copy(&bridge, opts) != KC_WVW_OK) {
         return KC_WVW_ERROR;
     }
-    if (!kc_wvw_bridge_url_trusted(&bridge, ctx->pending_url ? ctx->pending_url : ctx->opts.url)) {
+    if (!kc_wvw_bridge_url_trusted(ctx, &bridge, ctx->pending_url ? ctx->pending_url : ctx->opts.url)) {
         kc_wvw_bridge_state_free(&bridge);
         return KC_WVW_ERROR;
     }
@@ -2678,7 +2777,7 @@ struct kc_wvw {
     int tray_count;
 };
 
-static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *url);
+static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridge, const char *url);
 static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge);
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src);
 static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge);
@@ -2862,12 +2961,81 @@ static int kc_wvw_bridge_method_valid(const char *method) {
 }
 
 /**
+ * Extract the origin scheme and host from a URL string.
+ * @param url Candidate URL.
+ * @return Newly allocated origin string or NULL.
+ */
+static char *kc_wvw_extract_origin(const char *url) {
+    const char *p;
+    const char *end;
+    size_t len;
+
+    if (!url) {
+        return NULL;
+    }
+    p = strstr(url, "://");
+    if (!p) {
+        return NULL;
+    }
+    p += 3;
+    end = p;
+    while (*end && *end != '/' && *end != '?' && *end != '#') {
+        end++;
+    }
+    len = (size_t)(end - url);
+    return kc_wvw_strndup_range(url, len);
+}
+
+/**
+ * Search for an origin string within a space-separated list of origins.
+ * @param origin Target origin.
+ * @param list Space-separated list of origins.
+ * @return Non-zero if found, otherwise zero.
+ */
+static int kc_wvw_is_origin_in_list(const char *origin, const char *list) {
+    const char *p;
+    const char *next;
+    size_t len;
+    size_t origin_len;
+
+    if (!origin || !list) {
+        return 0;
+    }
+    origin_len = strlen(origin);
+    p = list;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+            p++;
+        }
+        if (!*p) {
+            break;
+        }
+        next = p;
+        while (*next && *next != ' ' && *next != '\t' && *next != '\r' && *next != '\n') {
+            next++;
+        }
+        len = (size_t)(next - p);
+        if (len == origin_len && strncmp(p, origin, len) == 0) {
+            return 1;
+        }
+        p = next;
+    }
+    return 0;
+}
+
+/**
  * Return whether one URL is trusted for the current bridge policy.
+ * @param ctx Window context.
  * @param bridge Bridge state.
  * @param url Candidate URL.
  * @return Non-zero when the URL is accepted, otherwise zero.
  */
-static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *url) {
+static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridge, const char *url) {
+    char *url_origin;
+    char *init_origin;
+    const char *env_trusted;
+    int trusted = 0;
+
     if (!bridge || !bridge->callback || !url) {
         return 0;
     }
@@ -2882,7 +3050,28 @@ static int kc_wvw_bridge_url_trusted(kc_wvw_bridge_state_t *bridge, const char *
         return 1;
     }
 
-    return 0;
+    url_origin = kc_wvw_extract_origin(url);
+    if (!url_origin) {
+        return 0;
+    }
+
+    env_trusted = getenv("TRUSTED_ORIGINS");
+    if (env_trusted && kc_wvw_is_origin_in_list(url_origin, env_trusted)) {
+        trusted = 1;
+    }
+
+    if (!trusted && ctx && ctx->opts.url) {
+        init_origin = kc_wvw_extract_origin(ctx->opts.url);
+        if (init_origin) {
+            if (strcmp(url_origin, init_origin) == 0) {
+                trusted = 1;
+            }
+            free(init_origin);
+        }
+    }
+
+    free(url_origin);
+    return trusted;
 }
 
 /**
@@ -3505,7 +3694,7 @@ static gboolean kc_wvw_linux_bridge_policy(WebKitWebView *web_view, WebKitPolicy
     action = webkit_navigation_policy_decision_get_navigation_action(nav);
     request = webkit_navigation_action_get_request(action);
     uri = request ? webkit_uri_request_get_uri(request) : NULL;
-    if (uri && !kc_wvw_bridge_url_trusted(&ctx->bridge, uri)) {
+    if (uri && !kc_wvw_bridge_url_trusted(ctx, &ctx->bridge, uri)) {
         webkit_policy_decision_ignore(decision);
         return TRUE;
     }
@@ -3875,7 +4064,7 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
     if (!ctx || !url) {
         return KC_WVW_ERROR;
     }
-    if (ctx->bridge.callback && !kc_wvw_bridge_url_trusted(&ctx->bridge, url)) {
+    if (ctx->bridge.callback && !kc_wvw_bridge_url_trusted(ctx, &ctx->bridge, url)) {
         return KC_WVW_ERROR;
     }
 
@@ -3900,7 +4089,7 @@ int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
     if (kc_wvw_bridge_state_copy(&bridge, opts) != KC_WVW_OK) {
         return KC_WVW_ERROR;
     }
-    if (!kc_wvw_bridge_url_trusted(&bridge, ctx->opts.url)) {
+    if (!kc_wvw_bridge_url_trusted(ctx, &bridge, ctx->opts.url)) {
         kc_wvw_bridge_state_free(&bridge);
         return KC_WVW_ERROR;
     }
@@ -4036,6 +4225,11 @@ static void kc_wvw_linux_tray_menu(GtkStatusIcon *icon, guint button, guint acti
             }
             gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
         }
+        item = gtk_separator_menu_item_new();
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
+        item = gtk_menu_item_new_with_label("Quit");
+        g_signal_connect(item, "activate", G_CALLBACK(kc_wvw_linux_tray_quit), ctx);
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
     } else {
         item = gtk_menu_item_new_with_label("Show/Hide");
         g_signal_connect(item, "activate", G_CALLBACK(kc_wvw_linux_tray_toggle), ctx);
