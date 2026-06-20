@@ -43,6 +43,21 @@ Start in fullscreen mode:
 ./bin/x86_64/linux/wvw --url https://example.com --fullscreen
 ```
 
+Open one transparent overlay with the native bridge interactive demo:
+
+```bash
+./bin/x86_64/linux/wvw --url "file:///home/kaisar/work/tests/WVW/interactive.html" --borderless --background 00000000 --always-on-top --bridge
+```
+
+Demo files are available under `tests/WVW/`:
+
+| File | Description |
+| :--- | :--- |
+| `interactive.html` | Panel with bridge buttons (ping, echo, stats, notify). Requires `--bridge`. |
+| `hud.html` | Floating HUD that listens for `nativebridge` stats events. |
+| `notifications.html` | Toast notification system that listens for `nativebridge` notification events. |
+| `index.html` | Minimal transparent panel demo. |
+
 ---
 
 ### Parameters
@@ -59,6 +74,7 @@ Start in fullscreen mode:
 | `--always-on-top` | Keep the window above normal windows. |
 | `--click-through` | Ignore mouse input on the host window. |
 | `--no-focus` | Prevent the window from activating for keyboard focus. |
+| `--bridge` | Enable NativeBridge with built-in demo methods (`ping`, `echo`, `getStats`, `notifyHost`). |
 | `-h`, `--help` | Show help and usage. |
 | `-v`, `--version` | Show build version. |
 
@@ -126,6 +142,19 @@ Bridge rules:
 - The bridge is disabled by default.
 - Remote navigation is blocked when the bridge is active.
 - `localhost` is denied unless the application enables it explicitly.
+
+### CLI built-in methods
+
+The `--bridge` flag registers four demo methods:
+
+| Method | Description |
+| :--- | :--- |
+| `ping` | Returns `{ok:true, pong:true}`. Use for connectivity checks. |
+| `echo` | Returns the input parameters wrapped in `{ok:true, echo: ...}`. |
+| `getStats` | Returns static mock system stats (`cpu`, `mem`, `bat`, `net`). |
+| `notifyHost` | Logs the payload to stderr and returns `{ok:true, received:true}`. |
+
+Any other method returns `{ok:false, error:"unknown method '...'"}`.
 
 ### Bridge API
 
