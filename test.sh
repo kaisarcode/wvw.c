@@ -1,5 +1,4 @@
 #!/bin/sh
-# test.sh
 # Summary: Validation suite for wvw CLI parsing and library API behavior.
 # Author:  KaisarCode
 # Website: https://kaisarcode.com
