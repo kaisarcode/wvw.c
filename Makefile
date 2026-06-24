@@ -18,11 +18,20 @@ define cmake_build
 	fi; \
 	if grep -q "ninja: no work to do." "$$prelog"; then \
 		rm -f "$$prelog"; \
-		cmake --build $(1); \
-		exit $$?; \
+		out=$$(mktemp); \
+		cmake --build $(1) 2>"$$out"; \
+		r=$$?; \
+		if [ -s "$$out" ]; then grep -v 'skipping incompatible' < "$$out"; fi; \
+		rm -f "$$out"; \
+		exit $$r; \
 	fi; \
 	rm -f "$$prelog"; \
-	if ! cmake --build $(1); then \
+	out=$$(mktemp); \
+	cmake --build $(1) 2>"$$out"; \
+	r=$$?; \
+	if [ -s "$$out" ]; then grep -v 'skipping incompatible' < "$$out"; fi; \
+	rm -f "$$out"; \
+	if [ $$r -ne 0 ]; then \
 		exit 1; \
 	fi; \
 	if [ -n "$(2)" ]; then \
