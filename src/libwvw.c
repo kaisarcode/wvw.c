@@ -3654,15 +3654,19 @@ static int kc_wvw_background_transparent(const char *text) {
  */
 static void kc_wvw_linux_destroy(GtkWidget *widget, gpointer userdata) {
     kc_wvw_t *ctx = (kc_wvw_t *)userdata;
+    int was_running = 0;
 
     (void)widget;
 
     if (ctx) {
+        was_running = ctx->running;
         ctx->running = 0;
         ctx->window = NULL;
         ctx->web_view = NULL;
     }
-    gtk_main_quit();
+    if (was_running && gtk_main_level() > 0) {
+        gtk_main_quit();
+    }
 }
 
 /**
@@ -4075,10 +4079,13 @@ int kc_wvw_open(kc_wvw_t **ctx_out, kc_wvw_options_t *opts) {
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 int kc_wvw_stop(kc_wvw_t *ctx) {
+    int was_running;
+
     if (!ctx) return KC_WVW_ERROR;
+    was_running = ctx->running;
     ctx->stop_requested = 1;
     ctx->running = 0;
-    if (ctx->window && GTK_IS_WIDGET(ctx->window)) {
+    if (was_running && gtk_main_level() > 0) {
         gtk_main_quit();
     }
     return KC_WVW_OK;
