@@ -100,6 +100,13 @@ int kc_wvw_on_signal(kc_wvw_t *ctx, int sig, kc_wvw_signal_callback_t cb);
 int kc_wvw_raise_signal(kc_wvw_t *ctx, int sig);
 
 /**
+ * Request stop for a specific wvw context.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_stop(kc_wvw_t *ctx);
+
+/**
  * Store the context for later signal dispatch.
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.

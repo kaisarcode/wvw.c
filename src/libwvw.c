@@ -72,6 +72,7 @@ struct kc_wvw {
     int running;
     int closing;
     int com_initialized;
+    volatile LONG stop_requested;
     HWND hwnd;
     HBRUSH background_brush;
     HINSTANCE hinstance;
@@ -109,7 +110,9 @@ static const kc_env_map_t env_config_table[] = {
 };
 
 static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
-static kc_wvw_t *g_signal_ctx = NULL;
+static kc_wvw_t **g_signal_ctx_list = NULL;
+static int g_signal_ctx_cap = 0;
+static int g_signal_ctx_count = 0;
 
 #ifndef KC_WVW_BUILD_VERSION
 #define KC_WVW_BUILD_VERSION 0
@@ -2274,7 +2277,15 @@ int kc_wvw_listen_signals(kc_wvw_t *ctx) {
     if (!ctx) {
         return KC_WVW_ERROR;
     }
-    g_signal_ctx = ctx;
+    if (g_signal_ctx_count >= g_signal_ctx_cap) {
+        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
+        kc_wvw_t **new_list = (kc_wvw_t **)realloc(g_signal_ctx_list,
+            (size_t)new_cap * sizeof(kc_wvw_t *));
+        if (!new_list) return KC_WVW_ERROR;
+        g_signal_ctx_list = new_list;
+        g_signal_ctx_cap = new_cap;
+    }
+    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
     return KC_WVW_OK;
 }
 
@@ -2288,7 +2299,15 @@ int kc_wvw_listen_signal(kc_wvw_t *ctx, int sig_id) {
     if (!ctx) {
         return KC_WVW_ERROR;
     }
-    g_signal_ctx = ctx;
+    if (g_signal_ctx_count >= g_signal_ctx_cap) {
+        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
+        kc_wvw_t **new_list = (kc_wvw_t **)realloc(g_signal_ctx_list,
+            (size_t)new_cap * sizeof(kc_wvw_t *));
+        if (!new_list) return KC_WVW_ERROR;
+        g_signal_ctx_list = new_list;
+        g_signal_ctx_cap = new_cap;
+    }
+    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
     (void)sig_id;
     return KC_WVW_OK;
 }
@@ -2299,8 +2318,11 @@ int kc_wvw_listen_signal(kc_wvw_t *ctx, int sig_id) {
  * @return None.
  */
 void kc_wvw_signal_listener(int sig) {
-    if (g_signal_ctx) {
-        kc_wvw_raise_signal(g_signal_ctx, sig);
+    int i;
+    for (i = 0; i < g_signal_ctx_count; i++) {
+        if (g_signal_ctx_list[i]) {
+            kc_wvw_raise_signal(g_signal_ctx_list[i], sig);
+        }
     }
 }
 
@@ -2360,13 +2382,36 @@ int kc_wvw_open(kc_wvw_t **ctx_out, kc_wvw_options_t *opts) {
 }
 
 /**
+ * Request stop for a specific wvw context.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_stop(kc_wvw_t *ctx) {
+    if (!ctx) return KC_WVW_ERROR;
+    ctx->stop_requested = 1;
+    ctx->running = 0;
+    if (ctx->hwnd) {
+        PostMessageW(ctx->hwnd, WM_CLOSE, 0, 0);
+    }
+    return KC_WVW_OK;
+}
+
+/**
  * Release a WebView context and its resources.
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 int kc_wvw_close(kc_wvw_t *ctx) {
+    int i;
     if (!ctx) {
         return KC_WVW_OK;
+    }
+
+    for (i = 0; i < g_signal_ctx_count; i++) {
+        if (g_signal_ctx_list[i] == ctx) {
+            g_signal_ctx_list[i] = g_signal_ctx_list[--g_signal_ctx_count];
+            break;
+        }
     }
 
     if (ctx->tray_enabled) {
@@ -2768,6 +2813,7 @@ struct kc_wvw {
     int n_signal_handlers;
     int signal_handlers_capacity;
     int running;
+    volatile sig_atomic_t stop_requested;
     GtkWidget *window;
     WebKitWebView *web_view;
     kc_wvw_bridge_state_t bridge;
@@ -2798,7 +2844,9 @@ static const kc_env_map_t env_config_table[] = {
 };
 
 static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
-static kc_wvw_t *g_signal_ctx = NULL;
+static kc_wvw_t **g_signal_ctx_list = NULL;
+static int g_signal_ctx_cap = 0;
+static int g_signal_ctx_count = 0;
 
 #ifndef KC_WVW_BUILD_VERSION
 #define KC_WVW_BUILD_VERSION 0
@@ -3922,7 +3970,15 @@ int kc_wvw_listen_signals(kc_wvw_t *ctx) {
     if (!ctx) {
         return KC_WVW_ERROR;
     }
-    g_signal_ctx = ctx;
+    if (g_signal_ctx_count >= g_signal_ctx_cap) {
+        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
+        kc_wvw_t **new_list = (kc_wvw_t **)realloc(g_signal_ctx_list,
+            (size_t)new_cap * sizeof(kc_wvw_t *));
+        if (!new_list) return KC_WVW_ERROR;
+        g_signal_ctx_list = new_list;
+        g_signal_ctx_cap = new_cap;
+    }
+    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
     return KC_WVW_OK;
 }
 
@@ -3936,7 +3992,15 @@ int kc_wvw_listen_signal(kc_wvw_t *ctx, int sig_id) {
     if (!ctx) {
         return KC_WVW_ERROR;
     }
-    g_signal_ctx = ctx;
+    if (g_signal_ctx_count >= g_signal_ctx_cap) {
+        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
+        kc_wvw_t **new_list = (kc_wvw_t **)realloc(g_signal_ctx_list,
+            (size_t)new_cap * sizeof(kc_wvw_t *));
+        if (!new_list) return KC_WVW_ERROR;
+        g_signal_ctx_list = new_list;
+        g_signal_ctx_cap = new_cap;
+    }
+    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
     signal(sig_id, kc_wvw_signal_listener);
     return KC_WVW_OK;
 }
@@ -3947,8 +4011,11 @@ int kc_wvw_listen_signal(kc_wvw_t *ctx, int sig_id) {
  * @return None.
  */
 void kc_wvw_signal_listener(int sig) {
-    if (g_signal_ctx && kc_wvw_raise_signal(g_signal_ctx, sig) == KC_WVW_OK) {
-        return;
+    int i;
+    for (i = 0; i < g_signal_ctx_count; i++) {
+        if (g_signal_ctx_list[i] &&
+            kc_wvw_raise_signal(g_signal_ctx_list[i], sig) == KC_WVW_OK)
+            return;
     }
     signal(sig, SIG_DFL);
     raise(sig);
@@ -4003,13 +4070,36 @@ int kc_wvw_open(kc_wvw_t **ctx_out, kc_wvw_options_t *opts) {
 }
 
 /**
+ * Request stop for a specific wvw context.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_stop(kc_wvw_t *ctx) {
+    if (!ctx) return KC_WVW_ERROR;
+    ctx->stop_requested = 1;
+    ctx->running = 0;
+    if (ctx->window && GTK_IS_WIDGET(ctx->window)) {
+        gtk_main_quit();
+    }
+    return KC_WVW_OK;
+}
+
+/**
  * Release a WebView context and its resources.
  * @param ctx Window context.
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 int kc_wvw_close(kc_wvw_t *ctx) {
+    int i;
     if (!ctx) {
         return KC_WVW_OK;
+    }
+
+    for (i = 0; i < g_signal_ctx_count; i++) {
+        if (g_signal_ctx_list[i] == ctx) {
+            g_signal_ctx_list[i] = g_signal_ctx_list[--g_signal_ctx_count];
+            break;
+        }
     }
 
     if (ctx->tray_enabled) {

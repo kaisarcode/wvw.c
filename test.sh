@@ -270,6 +270,46 @@ kc_test_library_api() {
     return 0
 }
 
+# Tests multi-context isolation: two contexts, stop one, other unaffected.
+# @return 0 on success or 1 on failure.
+kc_test_multi_context() {
+    helper_c="$TMP_ROOT/wvw-multictx.c"
+    helper_bin="$TMP_ROOT/wvw-multictx"
+    lib_dir=$(dirname "$SHARED_LIB")
+
+    printf '%s\n' \
+        '#include "wvw.h"' \
+        '#include <stdio.h>' \
+        '#include <string.h>' \
+        '' \
+        'int main(void) {' \
+        '    kc_wvw_options_t opts = kc_wvw_options_default();' \
+        '    kc_wvw_t *ctx1, *ctx2;' \
+        '    opts.url = "https://example.com";' \
+        '    opts.title = "Test";' \
+        '    if (kc_wvw_open(&ctx1, &opts) != KC_WVW_OK) return 1;' \
+        '    if (kc_wvw_open(&ctx2, &opts) != KC_WVW_OK) { kc_wvw_close(ctx1); return 1; }' \
+        '    if (kc_wvw_stop(NULL) != KC_WVW_ERROR) { kc_wvw_close(ctx1); kc_wvw_close(ctx2); return 2; }' \
+        '    if (kc_wvw_stop(ctx1) != KC_WVW_OK) { kc_wvw_close(ctx1); kc_wvw_close(ctx2); return 3; }' \
+        '    if (kc_wvw_stop(ctx2) != KC_WVW_OK) { kc_wvw_close(ctx1); kc_wvw_close(ctx2); return 4; }' \
+        '    kc_wvw_close(ctx1); kc_wvw_close(ctx2);' \
+        '    return 0;' \
+        '}' > "$helper_c"
+
+    if ! cc -I./src "$helper_c" -L"$lib_dir" -Wl,-rpath,"$lib_dir" -lwvw -o "$helper_bin"; then
+        kc_test_fail "multi_context: compile failed"
+        return 1
+    fi
+
+    if ! LD_LIBRARY_PATH="$lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$helper_bin"; then
+        kc_test_fail "multi_context: run failed"
+        return 1
+    fi
+
+    kc_test_pass "multi_context"
+    return 0
+}
+
 # Runs the full validation suite.
 # @return 0 on success or 1 on failure.
 kc_test_main() {
@@ -288,6 +328,8 @@ kc_test_main() {
     kc_test_cli_invalid_height || failed=$((failed + 1))
     kc_test_cli_unknown_option || failed=$((failed + 1))
     kc_test_library_api || failed=$((failed + 1))
+
+    kc_test_multi_context || failed=$((failed + 1))
 
     if [ "$failed" -ne 0 ]; then
         return 1
