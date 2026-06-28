@@ -331,6 +331,11 @@ Build targets such as `make x86_64/windows` compile project artifacts. Tests are
 make all
 make x86_64/linux
 make x86_64/windows
+make x86_64/macos
+make x86_64/iossim
+make aarch64/macos
+make aarch64/ios
+make aarch64/iossim
 ```
 
 The Windows target builds the backend as C and uses the official Microsoft Edge WebView2 Win32 SDK headers stored under `lib/webview2/include/`.
