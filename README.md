@@ -305,6 +305,26 @@ Compiled artifacts are generated under `bin/{arch}/{platform}/` for the supporte
 make clean && make
 ```
 
+### Tests
+
+The portable test entry point is `make test`. Build project artifacts first, then run tests. Tests compile only test executables and run through CTest.
+
+```bash
+make
+make test
+```
+
+To run the common `test` target in Windows-through-Wine mode:
+
+```bash
+make x86_64/windows
+make test wine
+```
+
+The portable C test source is `src/test.c`. Test binaries and runtime outputs are build artifacts and are not stored in the project tree.
+
+Build targets such as `make x86_64/windows` compile project artifacts. Tests are run only through `make test` or `make test wine`.
+
 ### Supported targets
 
 ```bash

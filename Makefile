@@ -8,6 +8,8 @@
 BUILD_DIR := .build
 BIN_DIR   := bin
 BUILD_VERSION ?= $(shell date +%s)
+WINE ?= wine
+WINE_X86_64_CC ?= x86_64-w64-mingw32-gcc
 
 define cmake_build
 	@prelog=$$(mktemp); \
@@ -132,7 +134,45 @@ x86_64/windows:
 ## Utility
 
 test:
-	@sh test.sh
+	@if [ -n "$(filter wine,$(MAKECMDGOALS))" ]; then \
+		if ! command -v $(WINE) >/dev/null 2>&1; then \
+			echo "Missing Wine runtime: $(WINE)" >&2; \
+			exit 1; \
+		fi; \
+		if ! command -v $(WINE_X86_64_CC) >/dev/null 2>&1; then \
+			echo "Missing Windows cross-compiler: $(WINE_X86_64_CC)" >&2; \
+			exit 1; \
+		fi; \
+		if [ ! -f $(BUILD_DIR)/test-wine/CMakeCache.txt ]; then \
+			cmake -S . -B $(BUILD_DIR)/test-wine \
+				-DCMAKE_BUILD_TYPE=Release \
+				-DCMAKE_SYSTEM_NAME=Windows \
+				-DCMAKE_C_COMPILER=$(WINE_X86_64_CC) \
+				-DWVW_BUILD_TESTS=ON \
+				-DWVW_TEST_SHARED_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwvw.dll \
+				-DWVW_TEST_IMPORT_LIBRARY=$(CURDIR)/$(BIN_DIR)/x86_64/windows/libwvw.dll.a \
+				-DCMAKE_CROSSCOMPILING_EMULATOR=$(WINE) \
+				-G Ninja -Wno-dev > /dev/null; \
+		fi; \
+		cmake --build $(BUILD_DIR)/test-wine --target wvw_contract_test || exit 1; \
+		ctest --test-dir $(BUILD_DIR)/test-wine --output-on-failure; \
+	else \
+		if [ ! -f $(BUILD_DIR)/test/CMakeCache.txt ]; then \
+			cmake -S . -B $(BUILD_DIR)/test \
+				-DCMAKE_BUILD_TYPE=Release \
+				-DWVW_BUILD_TESTS=ON \
+				-G Ninja -Wno-dev > /dev/null; \
+		fi; \
+		cmake --build $(BUILD_DIR)/test --target wvw_contract_test || exit 1; \
+		ctest --test-dir $(BUILD_DIR)/test --output-on-failure; \
+	fi
+
+wine:
+	@if [ -z "$(filter test,$(MAKECMDGOALS))" ]; then \
+		echo "Use 'make test wine' to run tests through Wine." >&2; \
+		exit 1; \
+	fi
+	@:
 
 clean:
 	@rm -rf $(BUILD_DIR)
