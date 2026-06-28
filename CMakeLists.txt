@@ -122,7 +122,7 @@ if(WVW_BUILD_TESTS)
     endif()
 
     if(WIN32)
-        target_link_libraries(wvw_contract_test ole32 uuid user32 gdi32 shell32)
+        target_link_libraries(wvw_contract_test PRIVATE ole32 uuid user32 gdi32 shell32)
     endif()
 
     add_custom_command(TARGET wvw_contract_test POST_BUILD
