@@ -11,7 +11,7 @@
 
 #define CINTERFACE
 #define COBJMACROS
-#include "wvw.h"
+#include "libwvw.h"
 
 #include <WebView2.h>
 #include <shlobj.h>
@@ -2766,7 +2766,7 @@ int kc_wvw_minimize(kc_wvw_t *ctx) {
 #else
 #else
 
-#include "wvw.h"
+#include "libwvw.h"
 
 #include <gtk/gtk.h>
 #include <signal.h>

@@ -109,7 +109,7 @@ Demo files are available under `tests/WVW/`:
 ## Public API
 
 ```c
-#include "wvw.h"
+#include "libwvw.h"
 
 kc_wvw_options_t opts = kc_wvw_options_default();
 opts.url = strdup("https://example.com");
@@ -379,6 +379,52 @@ WebView2 stores persistent browser state under:
 ```
 
 Wine can run the Windows backend when the prefix provides a working WebView2 rendering path. `KC_WVW_BROWSER_ARGS` is available for explicit WebView2 diagnostics and runtime experiments.
+
+---
+
+## Development Requirements
+
+### Build Tools
+
+- `make` (GNU Make)
+- `cmake` >= 3.14
+- `ninja`
+- `gcc` or `clang` (C11 compatible)
+- `pkg-config`
+
+### System Libraries
+
+Linux:
+- `libpthread`
+- `libm`
+- `gtk+-3.0`
+- `webkit2gtk-4.1`
+
+Windows (MSVC or MinGW):
+- `ole32`
+- `uuid`
+- `user32`
+- `gdi32`
+- `shell32`
+- WebView2 SDK (bundled in `lib/webview2/`)
+
+macOS / iOS:
+- `WebKit` framework
+- `Cocoa` framework
+- `Foundation` framework
+
+### Optional Cross-Compilation SDKs
+
+Required only for multiarch builds:
+
+- MinGW (`x86_64-w64-mingw32-gcc`) for Windows cross-compilation from Linux.
+- `wine` for running Windows tests on Linux.
+- `osxcross` with macOS and iOS SDKs for macOS and iOS targets.
+- Android NDK (version 27.2.12479018) for Android targets.
+
+### Test Dependencies
+
+- `ctest` (included with cmake)
 
 ---
 

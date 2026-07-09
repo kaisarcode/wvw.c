@@ -6,7 +6,7 @@
 #import <Foundation/Foundation.h>
 #import <WebKit/WebKit.h>
 
-#include "wvw.h"
+#include "libwvw.h"
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>

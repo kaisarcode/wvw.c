@@ -7,7 +7,7 @@
  * License: https://www.gnu.org/licenses/gpl-3.0.html
  */
 
-#include "wvw.h"
+#include "libwvw.h"
 
 #include <signal.h>
 #include <stdio.h>
