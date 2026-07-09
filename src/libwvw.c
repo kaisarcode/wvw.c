@@ -2764,7 +2764,6 @@ int kc_wvw_minimize(kc_wvw_t *ctx) {
 }
 
 #else
-#else
 
 #include "libwvw.h"
 
