@@ -84,8 +84,7 @@ NATIVE_TARGET := $(NATIVE_ARCH)/$(NATIVE_PLATFORM)
 
 .PHONY: native all test clean \
 	x86_64/linux x86_64/windows x86_64/macos \
-	x86_64/iossim \
-	aarch64/macos aarch64/ios aarch64/iossim
+	aarch64/macos
 
 native:
 	@if [ "$(NATIVE_ARCH)" = "unsupported" ] || [ "$(NATIVE_PLATFORM)" = "unsupported" ]; then \
@@ -94,7 +93,7 @@ native:
 	fi
 	@$(MAKE) BUILD_VERSION=$(BUILD_VERSION) $(NATIVE_TARGET)
 
-all: x86_64/linux x86_64/windows x86_64/macos x86_64/iossim aarch64/macos aarch64/ios aarch64/iossim
+all: x86_64/linux x86_64/windows x86_64/macos aarch64/macos
 
 ## Linux
 

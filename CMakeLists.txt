@@ -62,7 +62,7 @@ if(NOT WVW_TEST_EXTERNAL_ARTIFACTS)
             COMPILE_DEFINITIONS KC_WVW_BUILD_VERSION=${WVW_BUILD_VERSION}
         )
 
-        if(APPLE)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
             set(WVW_SOURCES src/macos.m)
             set_source_files_properties(src/libwvw.c PROPERTIES LANGUAGE OBJC)
             add_executable(wvw src/wvw.c ${WVW_SOURCES})
