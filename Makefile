@@ -11,6 +11,7 @@ BUILD_VERSION ?= $(shell date +%s)
 XDG_DATA_HOME ?= $(HOME)/.local/share
 OSXCROSS_ROOT ?= $(XDG_DATA_HOME)/osxcross/target
 MACOSX_DEPLOYMENT_TARGET ?= 11.0
+MACOSX_SDK ?= $(shell ls -d "$(OSXCROSS_ROOT)"/SDK/MacOSX*.sdk 2>/dev/null | sort -V | tail -n 1)
 IOS_DEPLOYMENT_TARGET ?= 13.0
 IPHONEOS_SDK ?= $(shell ls -d "$(OSXCROSS_ROOT)"/SDK/iPhoneOS*.sdk 2>/dev/null | sort -V | tail -n 1)
 IPHONESIMULATOR_SDK ?= $(shell ls -d "$(OSXCROSS_ROOT)"/SDK/iPhoneSimulator*.sdk 2>/dev/null | sort -V | tail -n 1)
@@ -155,7 +156,7 @@ define macos_target
 	@export OSXCROSS_HOST=$(1)-apple-darwin25.1 && \
 	export OSXCROSS_TARGET_DIR=$(OSXCROSS_ROOT) && \
 	export OSXCROSS_TARGET=darwin25.1 && \
-	export OSXCROSS_SDK=$(OSXCROSS_ROOT)/SDK/MacOSX26.1.sdk && \
+	export OSXCROSS_SDK=$(MACOSX_SDK) && \
 	export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
 	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
 	cache=$(BUILD_DIR)/$(1)-macos/CMakeCache.txt && \
@@ -202,7 +203,7 @@ define ios_target
 	@export OSXCROSS_HOST=$(1)-apple-darwin25.1 && \
 	export OSXCROSS_TARGET_DIR=$(OSXCROSS_ROOT) && \
 	export OSXCROSS_TARGET=darwin25.1 && \
-	export OSXCROSS_SDK=$(OSXCROSS_ROOT)/SDK/MacOSX26.1.sdk && \
+	export OSXCROSS_SDK=$(MACOSX_SDK) && \
 	export LD_LIBRARY_PATH="$(OSXCROSS_ROOT)/lib:$${LD_LIBRARY_PATH:-}" && \
 	export PATH="$(OSXCROSS_ROOT)/bin:$$PATH" && \
 	cache=$(BUILD_DIR)/$(1)-$(2)/CMakeCache.txt && \
