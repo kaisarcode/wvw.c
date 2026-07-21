@@ -50,11 +50,6 @@ typedef struct {
 } kc_env_map_t;
 
 typedef struct {
-    int sig;
-    kc_wvw_signal_callback_t cb;
-} kc_wvw_signal_entry_t;
-
-typedef struct {
     char **methods;
     int method_count;
     kc_wvw_bridge_callback_t callback;
@@ -66,9 +61,6 @@ typedef struct {
 
 struct kc_wvw {
     kc_wvw_options_t opts;
-    kc_wvw_signal_entry_t *signal_handlers;
-    int n_signal_handlers;
-    int signal_handlers_capacity;
     int running;
     int closing;
     int com_initialized;
@@ -110,10 +102,6 @@ static const kc_env_map_t env_config_table[] = {
 };
 
 static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
-static kc_wvw_t **g_signal_ctx_list = NULL;
-static int g_signal_ctx_cap = 0;
-static int g_signal_ctx_count = 0;
-
 #ifndef KC_WVW_BUILD_VERSION
 #define KC_WVW_BUILD_VERSION 0
 #endif
@@ -2197,136 +2185,6 @@ void kc_wvw_options_free(kc_wvw_options_t *opts) {
 }
 
 /**
- * Register a handler for a library-level signal number.
- * @param ctx Window context.
- * @param sig Application-defined signal number.
- * @param cb Callback to invoke.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_on_signal(kc_wvw_t *ctx, int sig, kc_wvw_signal_callback_t cb) {
-    int i;
-
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-
-    for (i = 0; i < ctx->n_signal_handlers; i++) {
-        if (ctx->signal_handlers[i].sig == sig) {
-            if (cb) {
-                ctx->signal_handlers[i].cb = cb;
-            } else {
-                int tail = ctx->n_signal_handlers - i - 1;
-                if (tail > 0) {
-                    memmove(&ctx->signal_handlers[i], &ctx->signal_handlers[i + 1], (size_t)tail * sizeof(kc_wvw_signal_entry_t));
-                }
-                ctx->n_signal_handlers--;
-            }
-            return KC_WVW_OK;
-        }
-    }
-
-    if (!cb) {
-        return KC_WVW_OK;
-    }
-
-    if (ctx->n_signal_handlers >= ctx->signal_handlers_capacity) {
-        int new_capacity = ctx->signal_handlers_capacity ? ctx->signal_handlers_capacity * 2 : 4;
-        kc_wvw_signal_entry_t *next_handlers = (kc_wvw_signal_entry_t *)realloc(ctx->signal_handlers, (size_t)new_capacity * sizeof(kc_wvw_signal_entry_t));
-        if (!next_handlers) {
-            return KC_WVW_ERROR;
-        }
-        ctx->signal_handlers = next_handlers;
-        ctx->signal_handlers_capacity = new_capacity;
-    }
-
-    ctx->signal_handlers[ctx->n_signal_handlers].sig = sig;
-    ctx->signal_handlers[ctx->n_signal_handlers].cb = cb;
-    ctx->n_signal_handlers++;
-    return KC_WVW_OK;
-}
-
-/**
- * Raise a library-level signal.
- * @param ctx Window context.
- * @param sig Signal number to raise.
- * @return KC_WVW_OK if handled or KC_WVW_ERROR if no handler exists.
- */
-int kc_wvw_raise_signal(kc_wvw_t *ctx, int sig) {
-    int i;
-
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-
-    for (i = 0; i < ctx->n_signal_handlers; i++) {
-        if (ctx->signal_handlers[i].sig == sig) {
-            ctx->signal_handlers[i].cb(ctx);
-            return KC_WVW_OK;
-        }
-    }
-
-    return KC_WVW_ERROR;
-}
-
-/**
- * Store the context for later signal dispatch.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_listen_signals(kc_wvw_t *ctx) {
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-    if (g_signal_ctx_count >= g_signal_ctx_cap) {
-        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
-        kc_wvw_t **new_list = (kc_wvw_t **)realloc(g_signal_ctx_list,
-            (size_t)new_cap * sizeof(kc_wvw_t *));
-        if (!new_list) return KC_WVW_ERROR;
-        g_signal_ctx_list = new_list;
-        g_signal_ctx_cap = new_cap;
-    }
-    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
-    return KC_WVW_OK;
-}
-
-/**
- * Connect one operating-system signal to the library dispatcher.
- * @param ctx Window context.
- * @param sig_id Operating-system signal number.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_listen_signal(kc_wvw_t *ctx, int sig_id) {
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-    if (g_signal_ctx_count >= g_signal_ctx_cap) {
-        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
-        kc_wvw_t **new_list = (kc_wvw_t **)realloc(g_signal_ctx_list,
-            (size_t)new_cap * sizeof(kc_wvw_t *));
-        if (!new_list) return KC_WVW_ERROR;
-        g_signal_ctx_list = new_list;
-        g_signal_ctx_cap = new_cap;
-    }
-    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
-    (void)sig_id;
-    return KC_WVW_OK;
-}
-
-/**
- * Dispatch an operating-system signal into the library signal table.
- * @param sig Operating-system signal number.
- * @return None.
- */
-void kc_wvw_signal_listener(int sig) {
-    int i;
-    for (i = 0; i < g_signal_ctx_count; i++) {
-        if (g_signal_ctx_list[i]) {
-            kc_wvw_raise_signal(g_signal_ctx_list[i], sig);
-        }
-    }
-}
-
-/**
  * Create a new native WebView context.
  * @param ctx_out Destination context pointer.
  * @param opts Configuration options.
@@ -2402,16 +2260,8 @@ int kc_wvw_stop(kc_wvw_t *ctx) {
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 int kc_wvw_close(kc_wvw_t *ctx) {
-    int i;
     if (!ctx) {
         return KC_WVW_OK;
-    }
-
-    for (i = 0; i < g_signal_ctx_count; i++) {
-        if (g_signal_ctx_list[i] == ctx) {
-            g_signal_ctx_list[i] = g_signal_ctx_list[--g_signal_ctx_count];
-            break;
-        }
     }
 
     if (ctx->tray_enabled) {
@@ -2448,7 +2298,6 @@ int kc_wvw_close(kc_wvw_t *ctx) {
     }
 
     free(ctx->pending_url);
-    free(ctx->signal_handlers);
     if (ctx->tray_items) {
         int i;
         for (i = 0; i < ctx->tray_count; i++) {
@@ -2768,7 +2617,6 @@ int kc_wvw_minimize(kc_wvw_t *ctx) {
 #include "libwvw.h"
 
 #include <gtk/gtk.h>
-#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -2790,11 +2638,6 @@ typedef struct {
 } kc_env_map_t;
 
 typedef struct {
-    int sig;
-    kc_wvw_signal_callback_t cb;
-} kc_wvw_signal_entry_t;
-
-typedef struct {
     char **methods;
     int method_count;
     kc_wvw_bridge_callback_t callback;
@@ -2806,9 +2649,6 @@ typedef struct {
 
 struct kc_wvw {
     kc_wvw_options_t opts;
-    kc_wvw_signal_entry_t *signal_handlers;
-    int n_signal_handlers;
-    int signal_handlers_capacity;
     int running;
     volatile sig_atomic_t stop_requested;
     GtkWidget *window;
@@ -2841,10 +2681,6 @@ static const kc_env_map_t env_config_table[] = {
 };
 
 static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
-static kc_wvw_t **g_signal_ctx_list = NULL;
-static int g_signal_ctx_cap = 0;
-static int g_signal_ctx_count = 0;
-
 #ifndef KC_WVW_BUILD_VERSION
 #define KC_WVW_BUILD_VERSION 0
 #endif
@@ -3891,138 +3727,6 @@ void kc_wvw_options_free(kc_wvw_options_t *opts) {
 }
 
 /**
- * Register a handler for a library-level signal number.
- * @param ctx Window context.
- * @param sig Application-defined signal number.
- * @param cb Callback to invoke.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_on_signal(kc_wvw_t *ctx, int sig, kc_wvw_signal_callback_t cb) {
-    int i;
-
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-
-    for (i = 0; i < ctx->n_signal_handlers; i++) {
-        if (ctx->signal_handlers[i].sig == sig) {
-            if (cb) {
-                ctx->signal_handlers[i].cb = cb;
-            } else {
-                int tail = ctx->n_signal_handlers - i - 1;
-                if (tail > 0) {
-                    memmove(&ctx->signal_handlers[i], &ctx->signal_handlers[i + 1], (size_t)tail * sizeof(kc_wvw_signal_entry_t));
-                }
-                ctx->n_signal_handlers--;
-            }
-            return KC_WVW_OK;
-        }
-    }
-
-    if (!cb) {
-        return KC_WVW_OK;
-    }
-
-    if (ctx->n_signal_handlers >= ctx->signal_handlers_capacity) {
-        int new_capacity = ctx->signal_handlers_capacity ? ctx->signal_handlers_capacity * 2 : 4;
-        kc_wvw_signal_entry_t *next_handlers = (kc_wvw_signal_entry_t *)realloc(ctx->signal_handlers, (size_t)new_capacity * sizeof(kc_wvw_signal_entry_t));
-        if (!next_handlers) {
-            return KC_WVW_ERROR;
-        }
-        ctx->signal_handlers = next_handlers;
-        ctx->signal_handlers_capacity = new_capacity;
-    }
-
-    ctx->signal_handlers[ctx->n_signal_handlers].sig = sig;
-    ctx->signal_handlers[ctx->n_signal_handlers].cb = cb;
-    ctx->n_signal_handlers++;
-    return KC_WVW_OK;
-}
-
-/**
- * Raise a library-level signal.
- * @param ctx Window context.
- * @param sig Signal number to raise.
- * @return KC_WVW_OK if handled or KC_WVW_ERROR if no handler exists.
- */
-int kc_wvw_raise_signal(kc_wvw_t *ctx, int sig) {
-    int i;
-
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-
-    for (i = 0; i < ctx->n_signal_handlers; i++) {
-        if (ctx->signal_handlers[i].sig == sig) {
-            ctx->signal_handlers[i].cb(ctx);
-            return KC_WVW_OK;
-        }
-    }
-
-    return KC_WVW_ERROR;
-}
-
-/**
- * Store the context for later signal dispatch.
- * @param ctx Window context.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_listen_signals(kc_wvw_t *ctx) {
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-    if (g_signal_ctx_count >= g_signal_ctx_cap) {
-        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
-        kc_wvw_t **new_list = (kc_wvw_t **)realloc(g_signal_ctx_list,
-            (size_t)new_cap * sizeof(kc_wvw_t *));
-        if (!new_list) return KC_WVW_ERROR;
-        g_signal_ctx_list = new_list;
-        g_signal_ctx_cap = new_cap;
-    }
-    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
-    return KC_WVW_OK;
-}
-
-/**
- * Connect one operating-system signal to the library dispatcher.
- * @param ctx Window context.
- * @param sig_id Operating-system signal number.
- * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
- */
-int kc_wvw_listen_signal(kc_wvw_t *ctx, int sig_id) {
-    if (!ctx) {
-        return KC_WVW_ERROR;
-    }
-    if (g_signal_ctx_count >= g_signal_ctx_cap) {
-        int new_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
-        kc_wvw_t **new_list = (kc_wvw_t **)realloc(g_signal_ctx_list,
-            (size_t)new_cap * sizeof(kc_wvw_t *));
-        if (!new_list) return KC_WVW_ERROR;
-        g_signal_ctx_list = new_list;
-        g_signal_ctx_cap = new_cap;
-    }
-    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
-    signal(sig_id, kc_wvw_signal_listener);
-    return KC_WVW_OK;
-}
-
-/**
- * Dispatch an operating-system signal into the library signal table.
- * @param sig Operating-system signal number.
- * @return None.
- */
-void kc_wvw_signal_listener(int sig) {
-    int i;
-    for (i = 0; i < g_signal_ctx_count; i++) {
-        if (g_signal_ctx_list[i] &&
-            kc_wvw_raise_signal(g_signal_ctx_list[i], sig) == KC_WVW_OK)
-            return;
-    }
-    signal(sig, SIG_DFL);
-    raise(sig);
-}
-
-/**
  * Create a new native WebView context.
  * @param ctx_out Destination context pointer.
  * @param opts Configuration options.
@@ -4094,16 +3798,8 @@ int kc_wvw_stop(kc_wvw_t *ctx) {
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 int kc_wvw_close(kc_wvw_t *ctx) {
-    int i;
     if (!ctx) {
         return KC_WVW_OK;
-    }
-
-    for (i = 0; i < g_signal_ctx_count; i++) {
-        if (g_signal_ctx_list[i] == ctx) {
-            g_signal_ctx_list[i] = g_signal_ctx_list[--g_signal_ctx_count];
-            break;
-        }
     }
 
     if (ctx->tray_enabled) {
@@ -4122,7 +3818,6 @@ int kc_wvw_close(kc_wvw_t *ctx) {
         }
         free(ctx->tray_items);
     }
-    free(ctx->signal_handlers);
     kc_wvw_bridge_state_free(&ctx->bridge);
     kc_wvw_options_free(&ctx->opts);
     free(ctx);

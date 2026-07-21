@@ -10,8 +10,8 @@ and an opt-in native bridge.
 ## Architecture
 
 The CLI builds options, opens one context, optionally enables demo bridge methods
-and a tray icon, registers termination handling, then enters the native event
-loop. The library deep-copies configuration and owns all native objects.
+and a tray icon, then enters the native event loop. The library deep-copies
+configuration and owns all native objects.
 
 The source files have fixed responsibilities:
 
@@ -137,10 +137,6 @@ application navigation or document lifecycle.
 `kc_wvw_run()` enters the backend's native UI loop and returns when that loop
 ends. Stop or close requests arrange loop termination through native mechanisms.
 UI operations are intended for the owning UI thread.
-
-OS-signal callbacks map process signals into context callbacks on supported
-platforms. Signal safety is constrained by the native UI operations invoked by
-those callbacks and must not be overstated.
 
 ## Persistence and Network
 

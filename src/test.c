@@ -13,27 +13,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-#include <io.h>
-#include <process.h>
-#define getpid _getpid
-#else
-#include <signal.h>
-#include <unistd.h>
-#endif
-
-static int signal_count = 0;
-static kc_wvw_t *signal_ctx_seen = NULL;
-
-/**
- * Records one signal callback invocation.
- * @param ctx Context supplied by the library.
- * @return None.
- */
-static void count_signal(kc_wvw_t *ctx) {
-    if (ctx) { signal_count++; signal_ctx_seen = ctx; }
-}
-
 /**
  * Verifies one integer result.
  * @param name Check description.
@@ -255,66 +234,6 @@ static int case_tray_set_menu(void) {
 }
 
 /**
- * Tests kc_wvw_on_signal.
- * @return 0 on success, 1 on failure.
- */
-static int case_on_signal(void) {
-    int rc;
-
-    rc = 0;
-    signal_count = 0;
-    rc += expect_int("on_signal NULL returns ERROR", KC_WVW_ERROR, kc_wvw_on_signal(NULL, 1, count_signal));
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_wvw_raise_signal.
- * @return 0 on success, 1 on failure.
- */
-static int case_raise_signal(void) {
-    int rc;
-
-    rc = 0;
-    signal_count = 0;
-    signal_ctx_seen = NULL;
-    rc += expect_int("raise_signal NULL returns ERROR", KC_WVW_ERROR, kc_wvw_raise_signal(NULL, 1));
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_wvw_listen_signals.
- * @return 0 on success, 1 on failure.
- */
-static int case_listen_signals(void) {
-    int rc;
-
-    rc = 0;
-    rc += expect_int("listen_signals NULL returns ERROR", KC_WVW_ERROR, kc_wvw_listen_signals(NULL));
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_wvw_listen_signal.
- * @return 0 on success, 1 on failure.
- */
-static int case_listen_signal(void) {
-    int rc;
-
-    rc = 0;
-    rc += expect_int("listen_signal NULL returns ERROR", KC_WVW_ERROR, kc_wvw_listen_signal(NULL, 1));
-    return rc == 0 ? 0 : 1;
-}
-
-/**
- * Tests kc_wvw_signal_listener.
- * @return 0 on success, 1 on failure.
- */
-static int case_signal_listener(void) {
-    kc_wvw_signal_listener(0);
-    return expect_true("signal_listener does not crash", 1);
-}
-
-/**
  * Runs one libwvw public API test case.
  * @param argc Argument count.
  * @param argv Argument vector.
@@ -341,11 +260,6 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "show") == 0) return case_show();
     if (strcmp(argv[1], "minimize") == 0) return case_minimize();
     if (strcmp(argv[1], "tray-set-menu") == 0) return case_tray_set_menu();
-    if (strcmp(argv[1], "on-signal") == 0) return case_on_signal();
-    if (strcmp(argv[1], "raise-signal") == 0) return case_raise_signal();
-    if (strcmp(argv[1], "listen-signals") == 0) return case_listen_signals();
-    if (strcmp(argv[1], "listen-signal") == 0) return case_listen_signal();
-    if (strcmp(argv[1], "signal-listener") == 0) return case_signal_listener();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

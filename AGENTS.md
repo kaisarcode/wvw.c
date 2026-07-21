@@ -71,7 +71,7 @@ The library does not download either dependency.
 
 The current macOS backend in `src/macos.m` opens WKWebView but bridge enablement
 and tray functions are stubs returning success. Its click-through, no-focus,
-background, signal, cleanup, and lifecycle behavior are not equivalent to Linux
+background, cleanup, and lifecycle behavior are not equivalent to Linux
 or Windows. Do not claim parity until runtime behavior exists and is tested.
 
 Transparent host mode and tray behavior are best-effort platform features, not

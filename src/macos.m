@@ -7,7 +7,6 @@
 #import <WebKit/WebKit.h>
 
 #include "libwvw.h"
-#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -26,11 +25,6 @@ typedef struct {
 } kc_env_map_t;
 
 typedef struct {
-    int sig;
-    kc_wvw_signal_callback_t cb;
-} kc_wvw_signal_entry_t;
-
-typedef struct {
     char **methods;
     int method_count;
     kc_wvw_bridge_callback_t callback;
@@ -42,9 +36,6 @@ typedef struct {
 
 struct kc_wvw {
     kc_wvw_options_t opts;
-    kc_wvw_signal_entry_t *signal_handlers;
-    int n_signal_handlers;
-    int signal_handlers_capacity;
     int running;
     int closing;
     void *ns_window;
@@ -66,26 +57,9 @@ static const kc_env_map_t env_config_table[] = {
 };
 
 static const int env_config_table_n = sizeof(env_config_table) / sizeof(env_config_table[0]);
-static kc_wvw_t **g_signal_ctx_list = NULL;
-static int g_signal_ctx_cap = 0;
-static int g_signal_ctx_count = 0;
-
 #ifndef KC_WVW_BUILD_VERSION
 #define KC_WVW_BUILD_VERSION 0ULL
 #endif
-
-static void kc_wvw_signal_init(void) {}
-static void kc_wvw_signal_unregister_all(kc_wvw_t *ctx) { (void)ctx; }
-static void kc_wvw_signal_dispatch(kc_wvw_t *ctx, int sig) {
-    for (int i = 0; i < g_signal_ctx_count; i++) {
-        if (g_signal_ctx_list[i] == ctx) {
-            for (int j = 0; j < ctx->n_signal_handlers; j++) {
-                if (ctx->signal_handlers[j].sig == sig && ctx->signal_handlers[j].cb)
-                    ctx->signal_handlers[j].cb(ctx);
-            }
-        }
-    }
-}
 
 static void kc_wvw_env_load(kc_wvw_options_t *opts) {
     for (int i = 0; i < env_config_table_n; i++) {
@@ -130,7 +104,6 @@ int kc_wvw_open(kc_wvw_t **out, kc_wvw_options_t *opts) {
     if (opts->url) ctx->opts.url = strdup(opts->url);
     if (opts->title) ctx->opts.title = strdup(opts->title);
     if (opts->background) ctx->opts.background = strdup(opts->background);
-    kc_wvw_signal_init();
     *out = ctx;
     return KC_WVW_OK;
 }
@@ -180,49 +153,11 @@ int kc_wvw_post_bridge_event(kc_wvw_t *ctx, const char *json) {
 
 int kc_wvw_close(kc_wvw_t *ctx) {
     if (!ctx) return KC_WVW_ERROR;
-    kc_wvw_signal_unregister_all(ctx);
     free(ctx->opts.url);
     free(ctx->opts.title);
     free(ctx->opts.background);
     free(ctx);
     return KC_WVW_OK;
-}
-
-int kc_wvw_on_signal(kc_wvw_t *ctx, int sig, kc_wvw_signal_callback_t cb) {
-    if (!ctx) return KC_WVW_ERROR;
-    if (ctx->n_signal_handlers >= ctx->signal_handlers_capacity) {
-        ctx->signal_handlers_capacity = ctx->signal_handlers_capacity ? ctx->signal_handlers_capacity * 2 : 4;
-        ctx->signal_handlers = (kc_wvw_signal_entry_t *)realloc(ctx->signal_handlers,
-            ctx->signal_handlers_capacity * sizeof(kc_wvw_signal_entry_t));
-    }
-    ctx->signal_handlers[ctx->n_signal_handlers].sig = sig;
-    ctx->signal_handlers[ctx->n_signal_handlers].cb = cb;
-    ctx->n_signal_handlers++;
-    return KC_WVW_OK;
-}
-
-int kc_wvw_raise_signal(kc_wvw_t *ctx, int sig) {
-    kc_wvw_signal_dispatch(ctx, sig);
-    return KC_WVW_OK;
-}
-
-int kc_wvw_listen_signals(kc_wvw_t *ctx) {
-    if (!ctx) return KC_WVW_ERROR;
-    if (g_signal_ctx_count >= g_signal_ctx_cap) {
-        g_signal_ctx_cap = g_signal_ctx_cap ? g_signal_ctx_cap * 2 : 4;
-        g_signal_ctx_list = (kc_wvw_t **)realloc(g_signal_ctx_list, g_signal_ctx_cap * sizeof(kc_wvw_t *));
-    }
-    g_signal_ctx_list[g_signal_ctx_count++] = ctx;
-    return KC_WVW_OK;
-}
-
-int kc_wvw_listen_signal(kc_wvw_t *ctx, int sig_id) {
-    (void)ctx; (void)sig_id;
-    return KC_WVW_OK;
-}
-
-void kc_wvw_signal_listener(int sig) {
-    kc_wvw_signal_dispatch(NULL, sig);
 }
 
 static int kc_wvw_macos_create_window(kc_wvw_t *ctx) {

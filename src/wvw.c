@@ -9,7 +9,6 @@
 
 #include "libwvw.h"
 
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,15 +37,6 @@ static void kc_print_help(const char *name) {
     printf("                     .ico path (Windows). Defaults to a system icon.\n");
     printf("    -h, --help        Show this help\n");
     printf("    -v, --version     Show build version\n");
-}
-
-/**
- * Close the active window when one operating-system signal arrives.
- * @param ctx Window context.
- * @return None.
- */
-static void kc_wvw_signal_cb(kc_wvw_t *ctx) {
-    kc_wvw_close(ctx);
 }
 
 /**
@@ -312,14 +302,6 @@ int main(int argc, char **argv) {
     if (tray_enabled) {
         kc_wvw_tray_init(ctx, opts.title ? opts.title : "wvw", tray_icon);
     }
-
-    kc_wvw_listen_signals(ctx);
-    kc_wvw_on_signal(ctx, SIGINT, kc_wvw_signal_cb);
-    kc_wvw_on_signal(ctx, SIGTERM, kc_wvw_signal_cb);
-#ifndef _WIN32
-    kc_wvw_listen_signal(ctx, SIGINT);
-    kc_wvw_listen_signal(ctx, SIGTERM);
-#endif
 
     if (kc_wvw_run(ctx) != KC_WVW_OK) {
         fprintf(stderr, "wvw: runtime failed\n");
