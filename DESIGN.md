@@ -64,10 +64,13 @@ Close must release them in lifecycle-safe order.
 macOS uses Cocoa and WKWebView from `src/macos.m`. It creates a titled resizable
 window, applies fullscreen, borderless, and topmost modes, and runs `NSApp`.
 
-The current backend does not implement NativeBridge despite returning success
-from bridge enablement. Tray functions are also no-op success stubs. Several
-other host modes and cleanup paths do not match the primary backends. This is an
-explicit implementation gap, not portable feature behavior.
+The bridge uses `WKScriptMessageHandler` to receive messages and
+`WKNavigationDelegate` for navigation policy. The bootstrap script is injected
+via `WKUserScript` at document start. Tray uses `NSStatusItem` with a context
+menu. Transparent host mode sets the window background to clear and disables
+webview drawsBackground. Click-through uses `setIgnoresMouseEvents:`. The close
+lifecycle properly releases `NSWindow` and `WKWebView` through
+`CFBridgingRetain`/`CFRelease`.
 
 ## NativeBridge
 

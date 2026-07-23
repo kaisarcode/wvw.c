@@ -69,10 +69,10 @@ and tray paths in `libwvw.c`. Windows requires a matching
 `WebView2Loader.dll` beside the executable and an installed WebView2 Runtime.
 The library does not download either dependency.
 
-The current macOS backend in `src/macos.m` opens WKWebView but bridge enablement
-and tray functions are stubs returning success. Its click-through, no-focus,
-background, cleanup, and lifecycle behavior are not equivalent to Linux
-or Windows. Do not claim parity until runtime behavior exists and is tested.
+macOS implements the bridge, navigation restriction, window, and tray paths in
+`src/macos.m` using Cocoa and WKWebView. The bridge uses
+`WKScriptMessageHandler` and `WKNavigationDelegate`. Tray uses `NSStatusItem`.
+macOS does not require `localhost` bridge allowance by default.
 
 Transparent host mode and tray behavior are best-effort platform features, not
 portable rendering guarantees.

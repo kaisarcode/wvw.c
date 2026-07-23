@@ -6,6 +6,7 @@ Backends:
 
 - Linux uses WebKitGTK.
 - Windows uses Microsoft Edge WebView2.
+- macOS uses WKWebView.
 
 ---
 
