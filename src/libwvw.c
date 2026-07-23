@@ -820,8 +820,12 @@ static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridg
     const char *env_trusted;
     int trusted = 0;
 
-    if (!bridge || !bridge->callback || !url) {
+    if (!bridge || !url) {
         return 0;
+    }
+
+    if (!bridge->callback) {
+        return 1;
     }
 
     if (bridge->allow_file && strncmp(url, "file://", 7) == 0) {
@@ -889,11 +893,15 @@ static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src) {
     int i;
 
-    if (!dst || !src || !src->methods || src->method_count < 0 || !src->callback) {
+    if (!dst || !src || src->method_count < 0) {
         return KC_WVW_ERROR;
     }
 
-    dst->methods = (char **)calloc((size_t)src->method_count, sizeof(char *));
+    if (src->method_count > 0 && (!src->methods || !src->callback)) {
+        return KC_WVW_ERROR;
+    }
+
+    dst->methods = (char **)calloc((size_t)(src->method_count > 0 ? src->method_count : 1), sizeof(char *));
     if (!dst->methods) {
         return KC_WVW_ERROR;
     }
@@ -1778,12 +1786,10 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
             return 0;
         }
         if (ctx && id == 0) {
-            if (IsWindowVisible(ctx->hwnd)) {
-                ShowWindow(ctx->hwnd, SW_HIDE);
-            } else {
+            if (!IsWindowVisible(ctx->hwnd)) {
                 ShowWindow(ctx->hwnd, SW_SHOW);
-                SetForegroundWindow(ctx->hwnd);
             }
+            SetForegroundWindow(ctx->hwnd);
             return 0;
         }
         if (ctx && id == 1) {
@@ -2848,6 +2854,15 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
     }
 
     result = NULL;
+    if (!ctx->bridge.callback) {
+        error = kc_wvw_bridge_error_object("METHOD_NOT_FOUND", "No bridge callback registered.");
+        response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+        free(id);
+        free(method);
+        free(params);
+        free(error);
+        return response;
+    }
     rc = ctx->bridge.callback(ctx, method, params, &result, ctx->bridge.userdata);
     if (rc == KC_WVW_OK) {
         if (!result) {
@@ -3173,8 +3188,12 @@ static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridg
     const char *env_trusted;
     int trusted = 0;
 
-    if (!bridge || !bridge->callback || !url) {
+    if (!bridge || !url) {
         return 0;
+    }
+
+    if (!bridge->callback) {
+        return 1;
     }
 
     if (bridge->allow_file && strncmp(url, "file://", 7) == 0) {
@@ -3242,11 +3261,15 @@ static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src) {
     int i;
 
-    if (!dst || !src || !src->methods || src->method_count < 0 || !src->callback) {
+    if (!dst || !src || src->method_count < 0) {
         return KC_WVW_ERROR;
     }
 
-    dst->methods = (char **)calloc((size_t)src->method_count, sizeof(char *));
+    if (src->method_count > 0 && (!src->methods || !src->callback)) {
+        return KC_WVW_ERROR;
+    }
+
+    dst->methods = (char **)calloc((size_t)(src->method_count > 0 ? src->method_count : 1), sizeof(char *));
     if (!dst->methods) {
         return KC_WVW_ERROR;
     }
@@ -3661,7 +3684,7 @@ static void kc_wvw_linux_destroy(GtkWidget *widget, gpointer userdata) {
 }
 
 /**
- * Intercept the window close button to minimize to tray when enabled.
+ * Intercept the window close button to hide to tray when enabled.
  * @param widget The window widget.
  * @param event GDK event.
  * @param userdata Window context.
@@ -4092,15 +4115,21 @@ static void kc_wvw_linux_tray_quit(GtkMenuItem *item, gpointer userdata) {
 }
 
 /**
- * Open the "Show/Hide" menu action on the tray context menu.
+ * Show the window from the tray context menu.
  * @param item Menu item.
  * @param userdata Window context.
  * @return None.
  */
-static void kc_wvw_linux_tray_toggle(GtkMenuItem *item, gpointer userdata) {
+static void kc_wvw_linux_tray_show(GtkMenuItem *item, gpointer userdata) {
     kc_wvw_t *ctx = (kc_wvw_t *)userdata;
     (void)item;
-    kc_wvw_linux_toggle_window(ctx);
+    if (!ctx || !ctx->window) {
+        return;
+    }
+    if (!gtk_widget_get_visible(ctx->window)) {
+        gtk_widget_show_all(ctx->window);
+    }
+    gtk_window_present(GTK_WINDOW(ctx->window));
 }
 
 /**
@@ -4131,7 +4160,7 @@ static void kc_wvw_linux_tray_item_clicked(GtkMenuItem *item, gpointer userdata)
 /**
  * Build and show the right-click context menu for the tray icon.
  * If custom items were set via kc_wvw_tray_set_menu(), use those;
- * otherwise fall back to the default Show/Hide and Quit items.
+ * otherwise fall back to the default Show and Quit items.
  * @param icon Status icon.
  * @param button Mouse button.
  * @param activate_time Event time.
@@ -4179,7 +4208,7 @@ static void kc_wvw_linux_tray_menu(GtkStatusIcon *icon, guint button, guint acti
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
     } else {
         item = gtk_menu_item_new_with_label("Show");
-        g_signal_connect(item, "activate", G_CALLBACK(kc_wvw_linux_tray_toggle), ctx);
+        g_signal_connect(item, "activate", G_CALLBACK(kc_wvw_linux_tray_show), ctx);
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 
         item = gtk_separator_menu_item_new();
@@ -4686,6 +4715,15 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
     }
 
     result = NULL;
+    if (!ctx->bridge.callback) {
+        error = kc_wvw_bridge_error_object("METHOD_NOT_FOUND", "No bridge callback registered.");
+        response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+        free(id);
+        free(method);
+        free(params);
+        free(error);
+        return response;
+    }
     rc = ctx->bridge.callback(ctx, method, params, &result, ctx->bridge.userdata);
     if (rc == KC_WVW_OK) {
         if (!result) {

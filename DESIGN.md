@@ -74,8 +74,10 @@ lifecycle properly releases `NSWindow` and `WKWebView` through
 
 ## NativeBridge
 
-The bridge is off until `kc_wvw_enable_bridge()` receives at least one valid
-method, a callback, and scheme allowances. Method names must be safe JavaScript
+The bridge is off until `kc_wvw_enable_bridge()` receives valid method
+configuration and scheme allowances. When `method_count` is positive, at least
+one method name and a non-NULL callback are required. When `method_count` is
+zero, methods and callback may be NULL. Method names must be safe JavaScript
 identifiers and are deep-copied into context state.
 
 Injected JavaScript creates `window.NativeBridge` with a Promise-only API.

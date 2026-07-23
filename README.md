@@ -51,7 +51,7 @@ Open one transparent overlay with the native bridge:
 ./bin/x86_64/linux/wvw --url "file:///home/kaisar/work/tests/WVW/interactive.html" --borderless --background 00000000 --always-on-top --bridge
 ```
 
-Open one overlay that minimizes to the tray with a system icon:
+Open one overlay that hides to the tray with a system icon:
 
 ```bash
 ./bin/x86_64/linux/wvw --url "file:///home/kaisar/work/tests/WVW/hud.html" --borderless --background 00000000 --tray emblem-system
@@ -74,7 +74,7 @@ Open one overlay that minimizes to the tray with a system icon:
 | `--click-through` | Ignore mouse input on the host window. |
 | `--no-focus` | Prevent the window from activating for keyboard focus. |
 | `--bridge` | Enable NativeBridge.window and NativeBridge.invoke. The standard CLI registers no custom invoke methods. |
-| `--tray [icon]` | Minimize to system tray on close. Optional icon name (Linux) or `.ico` path (Windows). |
+| `--tray [icon]` | Hide to system tray. Optional icon name (Linux) or `.ico` path (Windows). |
 | `-h`, `--help` | Show help and usage. |
 | `-v`, `--version` | Show build version. |
 
@@ -296,7 +296,7 @@ int main(void) {
 - `kc_wvw_set_title(ctx, title)` sets the native window title.
 - `kc_wvw_set_size(ctx, width, height)` sets the native window size.
 - `kc_wvw_get_state(ctx, &state)` retrieves the current window state.
-- `kc_wvw_tray_init(ctx, tooltip, icon)` creates a system-tray / notification-area icon. `tooltip` is the hover text (may be NULL), `icon` is a GTK icon name, a file path, or NULL for default. Left-click toggles the window, right-click opens a context menu with Show and Exit.
+- `kc_wvw_tray_init(ctx, tooltip, icon)` creates a system-tray / notification-area icon. `tooltip` is the hover text (may be NULL), `icon` is a GTK icon name, a file path, or NULL for default. Left-click toggles the window, right-click opens a context menu with Show and Exit. Show displays the window; Exit terminates.
 - `kc_wvw_tray_remove()` removes the tray icon.
 - `kc_wvw_tray_set_menu(ctx, items, count)` replaces the tray context menu with an array of `kc_wvw_tray_item_t` entries. Each entry has a `label` (NULL for separator) and an `action` string. Action `"quit"` is handled natively. Applications embedding libwvw may replace the default tray menu.
 - `kc_wvw_close()` releases the window, WebView, and associated resources.

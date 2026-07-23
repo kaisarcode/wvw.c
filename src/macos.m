@@ -312,11 +312,15 @@ static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src) {
     int i;
 
-    if (!dst || !src || !src->methods || src->method_count < 0 || !src->callback) {
+    if (!dst || !src || src->method_count < 0) {
         return KC_WVW_ERROR;
     }
 
-    dst->methods = (char **)calloc((size_t)src->method_count, sizeof(char *));
+    if (src->method_count > 0 && (!src->methods || !src->callback)) {
+        return KC_WVW_ERROR;
+    }
+
+    dst->methods = (char **)calloc((size_t)(src->method_count > 0 ? src->method_count : 1), sizeof(char *));
     if (!dst->methods) {
         return KC_WVW_ERROR;
     }
@@ -722,6 +726,15 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
     }
 
     result = NULL;
+    if (!ctx->bridge.callback) {
+        error = kc_wvw_bridge_error_object("METHOD_NOT_FOUND", "No bridge callback registered.");
+        response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+        free(id);
+        free(method);
+        free(params);
+        free(error);
+        return response;
+    }
     rc = ctx->bridge.callback(ctx, method, params, &result, ctx->bridge.userdata);
     if (rc == KC_WVW_OK) {
         if (!result) {
@@ -1331,8 +1344,8 @@ static void kc_wvw_macos_rebuild_tray_menu(kc_wvw_t *ctx) {
             [menu addItem:[NSMenuItem separatorItem]];
         }
 
-        NSMenuItem *showHide = [[NSMenuItem alloc] initWithTitle:@"Show" action:@selector(kc_wvw_tray_toggle_action:) keyEquivalent:@""];
-        [menu addItem:showHide];
+        NSMenuItem *showItem = [[NSMenuItem alloc] initWithTitle:@"Show" action:@selector(kc_wvw_tray_show_action:) keyEquivalent:@""];
+        [menu addItem:showItem];
 
         [menu addItem:[NSMenuItem separatorItem]];
 
@@ -1361,6 +1374,21 @@ static void kc_wvw_macos_rebuild_tray_menu(kc_wvw_t *ctx) {
         } else {
             [window makeKeyAndOrderFront:nil];
         }
+    }
+}
+
+- (void)kc_wvw_tray_show_action:(id)sender {
+    (void)sender;
+    if (!self.ctx || !self.ctx->ns_window) {
+        return;
+    }
+
+    @autoreleasepool {
+        NSWindow *window = (__bridge NSWindow *)self.ctx->ns_window;
+        if (![window isVisible]) {
+            [window makeKeyAndOrderFront:nil];
+        }
+        [window orderFrontRegardless];
     }
 }
 

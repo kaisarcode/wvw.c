@@ -33,7 +33,7 @@ static void kc_print_help(const char *name) {
     printf("    --click-through   Ignore mouse input on the host window\n");
     printf("    --no-focus        Do not activate the window for keyboard focus\n");
     printf("    --bridge          Enable NativeBridge.window and NativeBridge.invoke\n");
-    printf("    --tray [icon]     Minimize to system tray on close. Optional icon name (Linux) or\n");
+    printf("    --tray [icon]     Hide to system tray. Optional icon name (Linux) or\n");
     printf("                     .ico path (Windows). Defaults to a system icon.\n");
     printf("    -h, --help        Show this help\n");
     printf("    -v, --version     Show build version\n");
@@ -59,33 +59,6 @@ static int kc_wvw_parse_int(const char *text, int *out_value) {
     }
 
     *out_value = (int)value;
-    return KC_WVW_OK;
-}
-
-/**
- * Handle NativeBridge method calls from the WebView.
- * @param ctx Window context.
- * @param method Method name called from JavaScript.
- * @param params_json JSON arguments from JavaScript.
- * @param result_json Output pointer for response JSON.
- * @param userdata User data pointer.
- * @return KC_WVW_OK after writing the result.
- */
-static int kc_cli_bridge_callback(
-    kc_wvw_t *ctx,
-    const char *method,
-    const char *params_json,
-    char **result_json,
-    void *userdata
-) {
-    (void)ctx;
-    (void)method;
-    (void)params_json;
-    (void)userdata;
-    *result_json = strdup(
-        "{\"ok\":false,\"code\":\"METHOD_NOT_FOUND\","
-        "\"message\":\"Bridge method is not allowed.\"}"
-    );
     return KC_WVW_OK;
 }
 
@@ -197,12 +170,17 @@ int main(int argc, char **argv) {
         kc_wvw_bridge_options_t bopts;
         bopts.methods = allowed;
         bopts.method_count = 0;
-        bopts.callback = kc_cli_bridge_callback;
+        bopts.callback = NULL;
         bopts.userdata = NULL;
         bopts.allow_file = 1;
         bopts.allow_data = 0;
         bopts.allow_localhost = 0;
-        kc_wvw_enable_bridge(ctx, &bopts);
+        if (kc_wvw_enable_bridge(ctx, &bopts) != KC_WVW_OK) {
+            fprintf(stderr, "wvw: bridge init failed\n");
+            kc_wvw_close(ctx);
+            kc_wvw_options_free(&opts);
+            return 1;
+        }
     }
 
     {
@@ -212,7 +190,12 @@ int main(int argc, char **argv) {
         }
     }
     if (tray_enabled) {
-        kc_wvw_tray_init(ctx, opts.title ? opts.title : "wvw", tray_icon);
+        if (kc_wvw_tray_init(ctx, opts.title ? opts.title : "wvw", tray_icon) != KC_WVW_OK) {
+            fprintf(stderr, "wvw: tray init failed\n");
+            kc_wvw_close(ctx);
+            kc_wvw_options_free(&opts);
+            return 1;
+        }
     }
 
     if (kc_wvw_run(ctx) != KC_WVW_OK) {
