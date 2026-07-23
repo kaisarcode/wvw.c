@@ -61,6 +61,28 @@ oversized input, identifier injection, callback output, and origin parsing.
 
 Never enable the bridge for arbitrary remote content by default.
 
+## Security Implementation Rules
+
+Do not add default shell execution, process spawning, filesystem access,
+clipboard access, screen capture, input injection, window enumeration,
+external-window control, or dynamic native invocation.
+
+Do not add configuration options that execute commands or start application
+servers. Do not make `wvw` responsible for starting, supervising,
+authenticating, or securing application servers. Keep `wvw` independent of
+server language, application framework, and application architecture.
+
+Do not weaken the normal security policies of the platform WebView unless
+the change is explicitly required, narrowly scoped, and documented.
+
+Keep `NativeBridge.window` limited to the current `kc_wvw_t` instance. Keep
+`NativeBridge.invoke` closed by default and restricted to explicitly
+registered methods. Do not allow custom application methods to override
+built-in bridge methods.
+
+Treat the addition of any new built-in bridge capability as a
+security-sensitive architectural change.
+
 ## Platform Truth
 
 Do not hide platform differences behind the common API.

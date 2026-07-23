@@ -162,6 +162,9 @@ Bridge rules:
 - Remote navigation is blocked when the bridge is active.
 - `localhost` is denied unless the application enables it explicitly.
 
+`wvw` only hosts the provided URL and does not secure or audit the loaded
+application or server. See `DESIGN.md` for the full security boundary.
+
 ### CLI built-in methods
 
 The `--bridge` flag registers five demo methods:

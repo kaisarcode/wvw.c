@@ -113,6 +113,58 @@ Bridge messages are bounded to 65,536 bytes in the primary implementations.
 The extraction code recognizes the expected generated request shape rather than
 implementing complete JSON grammar.
 
+## Security and Responsibility Boundary
+
+`wvw` is a native window wrapper around a platform WebView. Its core
+responsibility is limited to creating and managing the current native window,
+loading a URL, hosting the platform WebView, providing window-related features
+such as transparency, borderless mode, always-on-top behavior, click-through
+behavior, system tray integration, and the documented window bridge API, and
+providing an optional custom bridge extension point for applications that embed
+`libwvw`.
+
+Loading a URL with the standard CLI is conceptually equivalent to opening that
+URL in a regular browser window. `wvw` does not audit, authenticate, authorize,
+or secure the web application, local server, remote server, or content loaded
+through `--url`. The security of the loaded application is outside the `wvw`
+security boundary. This includes server authentication, server authorization,
+HTTP APIs, WebSocket APIs, CORS configuration, filesystem access implemented by
+the server, process execution implemented by the server, database access,
+application-specific business logic, and custom launchers or service
+supervisors.
+
+The standard CLI must not expose sensitive native capabilities to loaded content
+by default.
+
+`NativeBridge.window` is a built-in API limited exclusively to the current
+`kc_wvw_t` window. `NativeBridge.window` must never accept native window
+handles, accept process identifiers, enumerate windows, control external
+windows, control another process, provide filesystem access, execute shell
+commands, spawn processes, load arbitrary native symbols, or expose arbitrary
+native code execution.
+
+`NativeBridge.invoke` is an optional extension point intended for applications
+embedding `libwvw`. `NativeBridge.invoke` must only dispatch methods explicitly
+registered by the embedding application. If no custom methods are registered,
+invoke calls must fail with a method-not-found error. There must be no generic
+invoke fallback, shell dispatcher, command executor, dynamic symbol lookup, or
+automatic mapping from JavaScript method names to native functions.
+
+Applications that register custom bridge methods are responsible for the
+security, validation, permissions, and behavior of those methods.
+
+A security defect in `wvw` exists when loaded content can obtain an
+unintended native capability, bypass explicit bridge activation, invoke a
+custom method that was not explicitly registered, control a window or
+process outside the current `wvw` context, execute commands or native code
+through a generic mechanism provided by `wvw`, or access sensitive host
+resources that `wvw` did not explicitly document and enable.
+
+Incorrect visual configuration, invalid dimensions, invalid colors, or
+application-specific bridge design choices are not part of this security
+boundary unless they create unintended native capabilities or memory-safety
+defects.
+
 ## Origin Policy
 
 Bridge-enabled navigation is accepted when it matches one of these explicit
