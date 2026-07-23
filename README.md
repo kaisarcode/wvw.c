@@ -1,7 +1,7 @@
 # wvw.c - Native WebView Window Wrapper
 
-`wvw.c` is a small C library and CLI for hosting a platform WebView in a
-controlled native window with optional application bridge.
+`wvw.c` is a C library and CLI for hosting a platform WebView in a controlled
+native window with optional application bridge.
 
 Backends:
 
