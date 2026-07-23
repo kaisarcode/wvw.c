@@ -561,6 +561,121 @@ static int case_bridge_empty_registry_method_count(void) {
 }
 
 /**
+ * Tests minimize then restore returns window to visible normal state.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_tray_show_restores_minimized(void) {
+    kc_wvw_options_t opts;
+    kc_wvw_t *ctx = NULL;
+    int rc;
+
+    rc = 0;
+    opts = kc_wvw_options_default();
+    free(opts.url);
+    opts.url = strdup("file:///dev/null");
+    if (kc_wvw_open(&ctx, &opts) != KC_WVW_OK) {
+        kc_wvw_options_free(&opts);
+        return 0;
+    }
+    rc += expect_int("minimize returns OK", KC_WVW_OK, kc_wvw_minimize(ctx));
+    rc += expect_int("restore returns OK", KC_WVW_OK, kc_wvw_restore(ctx));
+    rc += expect_int("get_state after restore reports visible", 1, ({
+        kc_wvw_window_state_t s = {0};
+        kc_wvw_get_state(ctx, &s);
+        s.visible;
+    }));
+    rc += expect_int("get_state after restore reports not minimized", 0, ({
+        kc_wvw_window_state_t s = {0};
+        kc_wvw_get_state(ctx, &s);
+        s.minimized;
+    }));
+    kc_wvw_close(ctx);
+    kc_wvw_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests hide then show returns window to visible state.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_tray_show_reveals_hidden(void) {
+    kc_wvw_options_t opts;
+    kc_wvw_t *ctx = NULL;
+    int rc;
+
+    rc = 0;
+    opts = kc_wvw_options_default();
+    free(opts.url);
+    opts.url = strdup("file:///dev/null");
+    if (kc_wvw_open(&ctx, &opts) != KC_WVW_OK) {
+        kc_wvw_options_free(&opts);
+        return 0;
+    }
+    rc += expect_int("hide returns OK", KC_WVW_OK, kc_wvw_hide(ctx));
+    rc += expect_int("get_state after hide reports not visible", 0, ({
+        kc_wvw_window_state_t s = {0};
+        kc_wvw_get_state(ctx, &s);
+        s.visible;
+    }));
+    rc += expect_int("show returns OK", KC_WVW_OK, kc_wvw_show(ctx));
+    rc += expect_int("get_state after show reports visible", 1, ({
+        kc_wvw_window_state_t s = {0};
+        kc_wvw_get_state(ctx, &s);
+        s.visible;
+    }));
+    kc_wvw_close(ctx);
+    kc_wvw_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests show on already-visible window does not change state.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_tray_show_no_hide_visible(void) {
+    kc_wvw_options_t opts;
+    kc_wvw_t *ctx = NULL;
+    int rc;
+
+    rc = 0;
+    opts = kc_wvw_options_default();
+    free(opts.url);
+    opts.url = strdup("file:///dev/null");
+    if (kc_wvw_open(&ctx, &opts) != KC_WVW_OK) {
+        kc_wvw_options_free(&opts);
+        return 0;
+    }
+    rc += expect_int("show on visible window returns OK", KC_WVW_OK, kc_wvw_show(ctx));
+    rc += expect_int("get_state after show reports visible", 1, ({
+        kc_wvw_window_state_t s = {0};
+        kc_wvw_get_state(ctx, &s);
+        s.visible;
+    }));
+    kc_wvw_close(ctx);
+    kc_wvw_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests no_focus option is stored correctly in options struct.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_tray_show_no_focus_option(void) {
+    kc_wvw_options_t opts;
+    int rc;
+
+    rc = 0;
+    opts = kc_wvw_options_default();
+    rc += expect_int("default no_focus is 0", 0, opts.no_focus);
+    opts.no_focus = 1;
+    rc += expect_int("set no_focus is 1", 1, opts.no_focus);
+    opts.no_focus = 0;
+    rc += expect_int("cleared no_focus is 0", 0, opts.no_focus);
+    kc_wvw_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
  * Runs one libwvw public API test case.
  * @param argc Argument count.
  * @param argv Argument vector.
@@ -600,6 +715,10 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "set-title") == 0) return case_set_title();
     if (strcmp(argv[1], "set-size") == 0) return case_set_size();
     if (strcmp(argv[1], "get-state") == 0) return case_get_state();
+    if (strcmp(argv[1], "tray-show-restores-minimized") == 0) return case_tray_show_restores_minimized();
+    if (strcmp(argv[1], "tray-show-reveals-hidden") == 0) return case_tray_show_reveals_hidden();
+    if (strcmp(argv[1], "tray-show-no-hide-visible") == 0) return case_tray_show_no_hide_visible();
+    if (strcmp(argv[1], "tray-show-no-focus-option") == 0) return case_tray_show_no_focus_option();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

@@ -1389,14 +1389,15 @@ static void kc_wvw_macos_rebuild_tray_menu(kc_wvw_t *ctx) {
 
     @autoreleasepool {
         NSWindow *window = (__bridge NSWindow *)self.ctx->ns_window;
+        if ([window isMiniaturized]) {
+            [window deminiaturize:nil];
+        }
         if (self.ctx->opts.no_focus) {
             if (![window isVisible]) {
                 [window orderFront:nil];
             }
         } else {
-            if (![window isVisible]) {
-                [window makeKeyAndOrderFront:nil];
-            }
+            [window makeKeyAndOrderFront:nil];
             [window orderFrontRegardless];
         }
     }

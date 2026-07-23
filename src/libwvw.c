@@ -1785,8 +1785,12 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
             return 0;
         }
         if (ctx && id == 0) {
-            if (!IsWindowVisible(ctx->hwnd)) {
-                ShowWindow(ctx->hwnd, SW_SHOW);
+            if (IsIconic(ctx->hwnd)) {
+                ShowWindow(ctx->hwnd,
+                    ctx->opts.no_focus ? SW_SHOWNOACTIVATE : SW_RESTORE);
+            } else if (!IsWindowVisible(ctx->hwnd)) {
+                ShowWindow(ctx->hwnd,
+                    ctx->opts.no_focus ? SW_SHOWNOACTIVATE : SW_SHOW);
             }
             if (!ctx->opts.no_focus) {
                 SetForegroundWindow(ctx->hwnd);
@@ -4128,6 +4132,7 @@ static void kc_wvw_linux_tray_show(GtkMenuItem *item, gpointer userdata) {
     if (!ctx || !ctx->window) {
         return;
     }
+    gtk_window_deiconify(GTK_WINDOW(ctx->window));
     if (!gtk_widget_get_visible(ctx->window)) {
         gtk_widget_show_all(ctx->window);
     }
@@ -4164,7 +4169,7 @@ static void kc_wvw_linux_tray_item_clicked(GtkMenuItem *item, gpointer userdata)
 /**
  * Build and show the right-click context menu for the tray icon.
  * If custom items were set via kc_wvw_tray_set_menu(), use those;
- * otherwise fall back to the default Show and Quit items.
+ * otherwise fall back to the default Show and Exit items.
  * @param icon Status icon.
  * @param button Mouse button.
  * @param activate_time Event time.
