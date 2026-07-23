@@ -146,6 +146,7 @@ int main(int argc, char **argv) {
         } else {
             fprintf(stderr, "wvw: unknown option '%s'\n", argv[i]);
             kc_wvw_options_free(&opts);
+            free(tray_icon);
             return 1;
         }
         i++;
@@ -166,9 +167,8 @@ int main(int argc, char **argv) {
     }
 
     if (bridge_enabled) {
-        const char *allowed[] = { NULL };
         kc_wvw_bridge_options_t bopts;
-        bopts.methods = allowed;
+        bopts.methods = NULL;
         bopts.method_count = 0;
         bopts.callback = NULL;
         bopts.userdata = NULL;
@@ -179,6 +179,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "wvw: bridge init failed\n");
             kc_wvw_close(ctx);
             kc_wvw_options_free(&opts);
+            free(tray_icon);
             return 1;
         }
     }
@@ -194,6 +195,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "wvw: tray init failed\n");
             kc_wvw_close(ctx);
             kc_wvw_options_free(&opts);
+            free(tray_icon);
             return 1;
         }
     }
@@ -202,6 +204,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "wvw: runtime failed\n");
         kc_wvw_close(ctx);
         kc_wvw_options_free(&opts);
+        free(tray_icon);
         return 1;
     }
 

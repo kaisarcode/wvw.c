@@ -415,6 +415,152 @@ static int case_get_state(void) {
 }
 
 /**
+ * Tests empty registry does not trust every URL via navigate.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_bridge_empty_registry_rejects_remote(void) {
+    kc_wvw_options_t opts;
+    kc_wvw_bridge_options_t bopts;
+    kc_wvw_t *ctx = NULL;
+    int rc;
+
+    rc = 0;
+    opts = kc_wvw_options_default();
+    free(opts.url);
+    opts.url = strdup("file:///dev/null");
+    if (kc_wvw_open(&ctx, &opts) != KC_WVW_OK) {
+        kc_wvw_options_free(&opts);
+        return 0;
+    }
+    memset(&bopts, 0, sizeof(bopts));
+    bopts.methods = NULL;
+    bopts.method_count = 0;
+    bopts.callback = NULL;
+    bopts.allow_file = 1;
+    if (kc_wvw_enable_bridge(ctx, &bopts) != KC_WVW_OK) {
+        kc_wvw_close(ctx);
+        kc_wvw_options_free(&opts);
+        return 1;
+    }
+    rc += expect_int("navigate to same file origin succeeds",
+        KC_WVW_OK, kc_wvw_navigate(ctx, "file:///dev/null"));
+    rc += expect_int("navigate to unrelated remote URL rejected",
+        KC_WVW_ERROR, kc_wvw_navigate(ctx, "https://evil.example.com/"));
+    rc += expect_int("navigate to data: URL rejected",
+        KC_WVW_ERROR, kc_wvw_navigate(ctx, "data:text/html,<h1>hi</h1>"));
+    kc_wvw_close(ctx);
+    kc_wvw_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests scheme allowances are enforced via enable_bridge.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_bridge_scheme_allowances(void) {
+    kc_wvw_options_t opts;
+    kc_wvw_bridge_options_t bopts;
+    kc_wvw_t *ctx = NULL;
+    int rc;
+
+    rc = 0;
+    opts = kc_wvw_options_default();
+    free(opts.url);
+    opts.url = strdup("file:///dev/null");
+    if (kc_wvw_open(&ctx, &opts) != KC_WVW_OK) {
+        kc_wvw_options_free(&opts);
+        return 0;
+    }
+    memset(&bopts, 0, sizeof(bopts));
+    bopts.methods = NULL;
+    bopts.method_count = 0;
+    bopts.callback = NULL;
+    bopts.allow_file = 1;
+    rc += expect_int("file:// initial URL accepted when allow_file=1",
+        KC_WVW_OK, kc_wvw_enable_bridge(ctx, &bopts));
+    rc += expect_int("navigate to data: blocked when allow_data=0",
+        KC_WVW_ERROR, kc_wvw_navigate(ctx, "data:text/html,<h1>test</h1>"));
+    rc += expect_int("navigate to remote blocked when not same-origin",
+        KC_WVW_ERROR, kc_wvw_navigate(ctx, "https://evil.example.com/"));
+    kc_wvw_close(ctx);
+    kc_wvw_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests navigate rejects untrusted URLs with bridge enabled.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_navigate_rejects_untrusted(void) {
+    kc_wvw_options_t opts;
+    kc_wvw_bridge_options_t bopts;
+    kc_wvw_t *ctx = NULL;
+    int rc;
+
+    rc = 0;
+    opts = kc_wvw_options_default();
+    free(opts.url);
+    opts.url = strdup("file:///dev/null");
+    if (kc_wvw_open(&ctx, &opts) != KC_WVW_OK) {
+        kc_wvw_options_free(&opts);
+        return 0;
+    }
+    memset(&bopts, 0, sizeof(bopts));
+    bopts.methods = NULL;
+    bopts.method_count = 0;
+    bopts.callback = NULL;
+    bopts.allow_file = 1;
+    if (kc_wvw_enable_bridge(ctx, &bopts) != KC_WVW_OK) {
+        kc_wvw_close(ctx);
+        kc_wvw_options_free(&opts);
+        return 1;
+    }
+    rc += expect_int("navigate to same file origin succeeds",
+        KC_WVW_OK, kc_wvw_navigate(ctx, "file:///dev/null"));
+    rc += expect_int("navigate to remote URL rejected",
+        KC_WVW_ERROR, kc_wvw_navigate(ctx, "https://evil.example.com/"));
+    kc_wvw_close(ctx);
+    kc_wvw_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests method_count is preserved for empty registry.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_bridge_empty_registry_method_count(void) {
+    kc_wvw_options_t opts;
+    kc_wvw_bridge_options_t bopts;
+    kc_wvw_t *ctx = NULL;
+    int rc;
+
+    rc = 0;
+    opts = kc_wvw_options_default();
+    free(opts.url);
+    opts.url = strdup("file:///dev/null");
+    if (kc_wvw_open(&ctx, &opts) != KC_WVW_OK) {
+        kc_wvw_options_free(&opts);
+        return 0;
+    }
+    memset(&bopts, 0, sizeof(bopts));
+    bopts.methods = NULL;
+    bopts.method_count = 0;
+    bopts.callback = NULL;
+    bopts.allow_file = 1;
+    if (kc_wvw_enable_bridge(ctx, &bopts) != KC_WVW_OK) {
+        kc_wvw_close(ctx);
+        kc_wvw_options_free(&opts);
+        return 1;
+    }
+    kc_wvw_window_state_t state;
+    rc += expect_int("get_state succeeds with empty bridge",
+        KC_WVW_OK, kc_wvw_get_state(ctx, &state));
+    kc_wvw_close(ctx);
+    kc_wvw_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
  * Runs one libwvw public API test case.
  * @param argc Argument count.
  * @param argv Argument vector.
@@ -438,6 +584,10 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "bridge-negative-method-count") == 0) return case_bridge_negative_method_count();
     if (strcmp(argv[1], "bridge-positive-without-methods") == 0) return case_bridge_positive_without_methods();
     if (strcmp(argv[1], "bridge-positive-without-callback") == 0) return case_bridge_positive_without_callback();
+    if (strcmp(argv[1], "bridge-empty-registry-rejects-remote") == 0) return case_bridge_empty_registry_rejects_remote();
+    if (strcmp(argv[1], "bridge-scheme-allowances") == 0) return case_bridge_scheme_allowances();
+    if (strcmp(argv[1], "navigate-rejects-untrusted") == 0) return case_navigate_rejects_untrusted();
+    if (strcmp(argv[1], "bridge-empty-registry-method-count") == 0) return case_bridge_empty_registry_method_count();
     if (strcmp(argv[1], "post-bridge-event") == 0) return case_post_bridge_event();
     if (strcmp(argv[1], "tray-init") == 0) return case_tray_init();
     if (strcmp(argv[1], "tray-remove") == 0) return case_tray_remove();

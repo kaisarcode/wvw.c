@@ -57,6 +57,7 @@ typedef struct {
     int allow_file;
     int allow_data;
     int allow_localhost;
+    int enabled;
 } kc_wvw_bridge_state_t;
 
 struct kc_wvw {
@@ -824,10 +825,6 @@ static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridg
         return 0;
     }
 
-    if (!bridge->callback) {
-        return 1;
-    }
-
     if (bridge->allow_file && strncmp(url, "file://", 7) == 0) {
         return 1;
     }
@@ -901,9 +898,11 @@ static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bri
         return KC_WVW_ERROR;
     }
 
-    dst->methods = (char **)calloc((size_t)(src->method_count > 0 ? src->method_count : 1), sizeof(char *));
-    if (!dst->methods) {
-        return KC_WVW_ERROR;
+    if (src->method_count > 0) {
+        dst->methods = (char **)calloc((size_t)src->method_count, sizeof(char *));
+        if (!dst->methods) {
+            return KC_WVW_ERROR;
+        }
     }
 
     dst->method_count = src->method_count;
@@ -1138,7 +1137,7 @@ static HRESULT STDMETHODCALLTYPE kc_wvw_navigation_invoke(ICoreWebView2Navigatio
     char utf8[4096];
 
     (void)sender;
-    if (!handler || !handler->ctx || !handler->ctx->bridge.callback || !args) {
+    if (!handler || !handler->ctx || !handler->ctx->bridge.enabled || !args) {
         return S_OK;
     }
 
@@ -1555,7 +1554,7 @@ static int kc_wvw_windows_install_bridge(kc_wvw_t *ctx) {
     char *script;
     HRESULT hr;
 
-    if (!ctx || !ctx->webview || !ctx->bridge.callback) {
+    if (!ctx || !ctx->webview || !ctx->bridge.enabled) {
         return KC_WVW_OK;
     }
 
@@ -1789,7 +1788,9 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
             if (!IsWindowVisible(ctx->hwnd)) {
                 ShowWindow(ctx->hwnd, SW_SHOW);
             }
-            SetForegroundWindow(ctx->hwnd);
+            if (!ctx->opts.no_focus) {
+                SetForegroundWindow(ctx->hwnd);
+            }
             return 0;
         }
         if (ctx && id == 1) {
@@ -2269,7 +2270,7 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
     if (!ctx || !url) {
         return KC_WVW_ERROR;
     }
-    if (ctx->bridge.callback && !kc_wvw_bridge_url_trusted(ctx, &ctx->bridge, url)) {
+    if (ctx->bridge.enabled && !kc_wvw_bridge_url_trusted(ctx, &ctx->bridge, url)) {
         return KC_WVW_ERROR;
     }
 
@@ -2311,6 +2312,7 @@ int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
     if (kc_wvw_bridge_state_copy(&bridge, opts) != KC_WVW_OK) {
         return KC_WVW_ERROR;
     }
+    bridge.enabled = 1;
     if (!kc_wvw_bridge_url_trusted(ctx, &bridge, ctx->pending_url ? ctx->pending_url : ctx->opts.url)) {
         kc_wvw_bridge_state_free(&bridge);
         return KC_WVW_ERROR;
@@ -2916,6 +2918,7 @@ typedef struct {
     int allow_file;
     int allow_data;
     int allow_localhost;
+    int enabled;
 } kc_wvw_bridge_state_t;
 
 struct kc_wvw {
@@ -3192,10 +3195,6 @@ static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridg
         return 0;
     }
 
-    if (!bridge->callback) {
-        return 1;
-    }
-
     if (bridge->allow_file && strncmp(url, "file://", 7) == 0) {
         return 1;
     }
@@ -3269,9 +3268,11 @@ static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bri
         return KC_WVW_ERROR;
     }
 
-    dst->methods = (char **)calloc((size_t)(src->method_count > 0 ? src->method_count : 1), sizeof(char *));
-    if (!dst->methods) {
-        return KC_WVW_ERROR;
+    if (src->method_count > 0) {
+        dst->methods = (char **)calloc((size_t)src->method_count, sizeof(char *));
+        if (!dst->methods) {
+            return KC_WVW_ERROR;
+        }
     }
 
     dst->method_count = src->method_count;
@@ -3752,7 +3753,7 @@ static gboolean kc_wvw_linux_bridge_policy(WebKitWebView *web_view, WebKitPolicy
 
     (void)web_view;
     ctx = (kc_wvw_t *)user_data;
-    if (!ctx || !ctx->bridge.callback || type != WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION) {
+    if (!ctx || !ctx->bridge.enabled || type != WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION) {
         return FALSE;
     }
 
@@ -3777,7 +3778,7 @@ static int kc_wvw_linux_install_bridge(kc_wvw_t *ctx) {
     WebKitUserContentManager *manager;
     char *script;
 
-    if (!ctx || !ctx->web_view || !ctx->bridge.callback) {
+    if (!ctx || !ctx->web_view || !ctx->bridge.enabled) {
         return KC_WVW_OK;
     }
 
@@ -4034,7 +4035,7 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
     if (!ctx || !url) {
         return KC_WVW_ERROR;
     }
-    if (ctx->bridge.callback && !kc_wvw_bridge_url_trusted(ctx, &ctx->bridge, url)) {
+    if (ctx->bridge.enabled && !kc_wvw_bridge_url_trusted(ctx, &ctx->bridge, url)) {
         return KC_WVW_ERROR;
     }
 
@@ -4059,6 +4060,7 @@ int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
     if (kc_wvw_bridge_state_copy(&bridge, opts) != KC_WVW_OK) {
         return KC_WVW_ERROR;
     }
+    bridge.enabled = 1;
     if (!kc_wvw_bridge_url_trusted(ctx, &bridge, ctx->opts.url)) {
         kc_wvw_bridge_state_free(&bridge);
         return KC_WVW_ERROR;
@@ -4129,7 +4131,9 @@ static void kc_wvw_linux_tray_show(GtkMenuItem *item, gpointer userdata) {
     if (!gtk_widget_get_visible(ctx->window)) {
         gtk_widget_show_all(ctx->window);
     }
-    gtk_window_present(GTK_WINDOW(ctx->window));
+    if (!ctx->opts.no_focus) {
+        gtk_window_present(GTK_WINDOW(ctx->window));
+    }
 }
 
 /**

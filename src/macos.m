@@ -40,6 +40,7 @@ typedef struct {
     int allow_file;
     int allow_data;
     int allow_localhost;
+    int enabled;
 } kc_wvw_bridge_state_t;
 
 struct kc_wvw {
@@ -254,7 +255,7 @@ static int kc_wvw_bridge_url_trusted(kc_wvw_t *ctx, kc_wvw_bridge_state_t *bridg
     const char *env_trusted;
     int trusted = 0;
 
-    if (!bridge || !bridge->callback || !url) {
+    if (!bridge || !url) {
         return 0;
     }
 
@@ -320,9 +321,11 @@ static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bri
         return KC_WVW_ERROR;
     }
 
-    dst->methods = (char **)calloc((size_t)(src->method_count > 0 ? src->method_count : 1), sizeof(char *));
-    if (!dst->methods) {
-        return KC_WVW_ERROR;
+    if (src->method_count > 0) {
+        dst->methods = (char **)calloc((size_t)src->method_count, sizeof(char *));
+        if (!dst->methods) {
+            return KC_WVW_ERROR;
+        }
     }
 
     dst->method_count = src->method_count;
@@ -838,7 +841,7 @@ static int kc_wvw_background_transparent(const char *text) {
     decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
                    decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler {
     (void)webView;
-    if (!self.ctx || !self.ctx->bridge.callback) {
+    if (!self.ctx || !self.ctx->bridge.enabled) {
         decisionHandler(WKNavigationActionPolicyAllow);
         return;
     }
@@ -978,7 +981,7 @@ int kc_wvw_navigate(kc_wvw_t *ctx, const char *url) {
         return KC_WVW_ERROR;
     }
 
-    if (ctx->bridge.callback && !kc_wvw_bridge_url_trusted(ctx, &ctx->bridge, url)) {
+    if (ctx->bridge.enabled && !kc_wvw_bridge_url_trusted(ctx, &ctx->bridge, url)) {
         return KC_WVW_ERROR;
     }
 
@@ -1030,7 +1033,7 @@ static int kc_wvw_macos_install_bridge(kc_wvw_t *ctx) {
     char *script;
     NSString *nsScript;
 
-    if (!ctx || !ctx->ns_webview || !ctx->bridge.callback) {
+    if (!ctx || !ctx->ns_webview || !ctx->bridge.enabled) {
         return KC_WVW_OK;
     }
 
@@ -1078,6 +1081,7 @@ int kc_wvw_enable_bridge(kc_wvw_t *ctx, const kc_wvw_bridge_options_t *opts) {
     if (kc_wvw_bridge_state_copy(&bridge, opts) != KC_WVW_OK) {
         return KC_WVW_ERROR;
     }
+    bridge.enabled = 1;
     if (!kc_wvw_bridge_url_trusted(ctx, &bridge, ctx->opts.url)) {
         kc_wvw_bridge_state_free(&bridge);
         return KC_WVW_ERROR;
@@ -1385,10 +1389,16 @@ static void kc_wvw_macos_rebuild_tray_menu(kc_wvw_t *ctx) {
 
     @autoreleasepool {
         NSWindow *window = (__bridge NSWindow *)self.ctx->ns_window;
-        if (![window isVisible]) {
-            [window makeKeyAndOrderFront:nil];
+        if (self.ctx->opts.no_focus) {
+            if (![window isVisible]) {
+                [window orderFront:nil];
+            }
+        } else {
+            if (![window isVisible]) {
+                [window makeKeyAndOrderFront:nil];
+            }
+            [window orderFrontRegardless];
         }
-        [window orderFrontRegardless];
     }
 }
 
