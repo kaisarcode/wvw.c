@@ -889,7 +889,7 @@ static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src) {
     int i;
 
-    if (!dst || !src || !src->methods || src->method_count <= 0 || !src->callback) {
+    if (!dst || !src || !src->methods || src->method_count < 0 || !src->callback) {
         return KC_WVW_ERROR;
     }
 
@@ -1740,13 +1740,13 @@ static LRESULT CALLBACK kc_wvw_window_proc(HWND hwnd, UINT msg, WPARAM wparam, L
                         }
                     }
                     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
-                    MultiByteToWideChar(CP_UTF8, 0, "Quit", -1, wlabel, 256);
+                    MultiByteToWideChar(CP_UTF8, 0, "Exit", -1, wlabel, 256);
                     wlabel[255] = L'\0';
                     AppendMenuW(menu, MF_STRING, (UINT_PTR)ctx->tray_count, wlabel);
                 } else {
-                    AppendMenuW(menu, MF_STRING, 0, L"Show/Hide");
+                    AppendMenuW(menu, MF_STRING, 0, L"Show");
                     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
-                    AppendMenuW(menu, MF_STRING, 1, L"Quit");
+                    AppendMenuW(menu, MF_STRING, 1, L"Exit");
                 }
                 SetForegroundWindow(ctx ? ctx->hwnd : NULL);
                 TrackPopupMenu(menu, TPM_RIGHTBUTTON, 0, 0, 0, ctx ? ctx->hwnd : NULL, NULL);
@@ -3242,7 +3242,7 @@ static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src) {
     int i;
 
-    if (!dst || !src || !src->methods || src->method_count <= 0 || !src->callback) {
+    if (!dst || !src || !src->methods || src->method_count < 0 || !src->callback) {
         return KC_WVW_ERROR;
     }
 
@@ -4174,18 +4174,18 @@ static void kc_wvw_linux_tray_menu(GtkStatusIcon *icon, guint button, guint acti
         }
         item = gtk_separator_menu_item_new();
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
-        item = gtk_menu_item_new_with_label("Quit");
+        item = gtk_menu_item_new_with_label("Exit");
         g_signal_connect(item, "activate", G_CALLBACK(kc_wvw_linux_tray_quit), ctx);
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
     } else {
-        item = gtk_menu_item_new_with_label("Show/Hide");
+        item = gtk_menu_item_new_with_label("Show");
         g_signal_connect(item, "activate", G_CALLBACK(kc_wvw_linux_tray_toggle), ctx);
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 
         item = gtk_separator_menu_item_new();
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
 
-        item = gtk_menu_item_new_with_label("Quit");
+        item = gtk_menu_item_new_with_label("Exit");
         g_signal_connect(item, "activate", G_CALLBACK(kc_wvw_linux_tray_quit), ctx);
         gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
     }

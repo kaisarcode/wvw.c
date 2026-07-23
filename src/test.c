@@ -150,6 +150,62 @@ static int case_enable_bridge(void) {
 }
 
 /**
+ * Bridge callback that returns METHOD_NOT_FOUND for empty
+ * registry tests.
+ * @param ctx Window context.
+ * @param method Method name.
+ * @param params_json JSON arguments.
+ * @param result_json Output response.
+ * @param userdata User data.
+ * @return KC_WVW_OK.
+ */
+static int kc_test_empty_bridge_callback(
+    kc_wvw_t *ctx,
+    const char *method,
+    const char *params_json,
+    char **result_json,
+    void *userdata
+) {
+    (void)ctx;
+    (void)method;
+    (void)params_json;
+    (void)userdata;
+    *result_json = strdup("{\"ok\":false,\"code\":\"METHOD_NOT_FOUND\"}");
+    return KC_WVW_OK;
+}
+
+/**
+ * Tests bridge initialization with an empty method registry.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_bridge_empty_registry(void) {
+    kc_wvw_options_t opts;
+    kc_wvw_bridge_options_t bopts;
+    kc_wvw_t *ctx = NULL;
+    const char *methods[] = { NULL };
+    int rc;
+
+    rc = 0;
+    opts = kc_wvw_options_default();
+    free(opts.url);
+    opts.url = strdup("file:///dev/null");
+    if (kc_wvw_open(&ctx, &opts) != KC_WVW_OK) {
+        kc_wvw_options_free(&opts);
+        return 0;
+    }
+    memset(&bopts, 0, sizeof(bopts));
+    bopts.methods = methods;
+    bopts.method_count = 0;
+    bopts.callback = kc_test_empty_bridge_callback;
+    bopts.userdata = NULL;
+    bopts.allow_file = 1;
+    rc += expect_int("enable_bridge(empty) returns OK", KC_WVW_OK, kc_wvw_enable_bridge(ctx, &bopts));
+    kc_wvw_close(ctx);
+    kc_wvw_options_free(&opts);
+    return rc == 0 ? 0 : 1;
+}
+
+/**
  * Tests kc_wvw_post_bridge_event.
  * @return 0 on success, 1 on failure.
  */
@@ -315,6 +371,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "stop") == 0) return case_stop();
     if (strcmp(argv[1], "navigate") == 0) return case_navigate();
     if (strcmp(argv[1], "enable-bridge") == 0) return case_enable_bridge();
+    if (strcmp(argv[1], "bridge-empty-registry") == 0) return case_bridge_empty_registry();
     if (strcmp(argv[1], "post-bridge-event") == 0) return case_post_bridge_event();
     if (strcmp(argv[1], "tray-init") == 0) return case_tray_init();
     if (strcmp(argv[1], "tray-remove") == 0) return case_tray_remove();

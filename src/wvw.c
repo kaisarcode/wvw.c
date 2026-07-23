@@ -32,7 +32,7 @@ static void kc_print_help(const char *name) {
     printf("    --always-on-top   Keep the window above normal windows\n");
     printf("    --click-through   Ignore mouse input on the host window\n");
     printf("    --no-focus        Do not activate the window for keyboard focus\n");
-    printf("    --bridge          Enable NativeBridge with built-in demo methods\n");
+    printf("    --bridge          Enable NativeBridge.window and NativeBridge.invoke\n");
     printf("    --tray [icon]     Minimize to system tray on close. Optional icon name (Linux) or\n");
     printf("                     .ico path (Windows). Defaults to a system icon.\n");
     printf("    -h, --help        Show this help\n");
@@ -79,98 +79,13 @@ static int kc_cli_bridge_callback(
     void *userdata
 ) {
     (void)ctx;
+    (void)method;
+    (void)params_json;
     (void)userdata;
-    char *buf;
-    int n;
-
-    if (strcmp(method, "ping") == 0) {
-        *result_json = strdup("{\"ok\":true,\"pong\":true}");
-        return KC_WVW_OK;
-    }
-
-    if (strcmp(method, "echo") == 0) {
-        n = snprintf(NULL, 0, "{\"ok\":true,\"echo\":%s}",
-            params_json ? params_json : "null");
-        buf = malloc(n + 1);
-        if (buf) {
-            snprintf(buf, n + 1, "{\"ok\":true,\"echo\":%s}",
-                params_json ? params_json : "null");
-        }
-        *result_json = buf;
-        return KC_WVW_OK;
-    }
-
-    if (strcmp(method, "getStats") == 0) {
-        *result_json = strdup(
-            "{\"ok\":true,\"cpu\":\"23%\",\"mem\":\"6.2/15.6 GB\","
-            "\"bat\":\"78%\",\"net\":\"\xe2\xac\x87 1.2 \xe2\xac\x86 0.4 MB/s\"}"
-        );
-        return KC_WVW_OK;
-    }
-
-    if (strcmp(method, "notifyHost") == 0) {
-        fprintf(stderr, "[wvw bridge] host notification: %s\n",
-            params_json ? params_json : "");
-        *result_json = strdup("{\"ok\":true,\"received\":true}");
-        return KC_WVW_OK;
-    }
-
-    if (strcmp(method, "setTrayMenu") == 0 && params_json) {
-        kc_wvw_tray_item_t items[64];
-        int count = 0;
-        const char *p = params_json;
-        while (count < 64 && (p = strstr(p, "\"label\"")) != NULL) {
-            char label[256], action[256];
-            const char *start, *end;
-            size_t len;
-            p = strchr(p, ':');
-            if (!p) break;
-            p++;
-            while (*p == ' ' || *p == '\t') p++;
-            if (*p != '"') break;
-            p++;
-            start = p;
-            while (*p && *p != '"') p++;
-            end = p;
-            if (start >= end) break;
-            len = end - start;
-            if (len >= sizeof(label)) len = sizeof(label) - 1;
-            memcpy(label, start, len);
-            label[len] = '\0';
-            p = strstr(p, "\"action\"");
-            if (!p) break;
-            p = strchr(p, ':');
-            if (!p) break;
-            p++;
-            while (*p == ' ' || *p == '\t') p++;
-            if (*p != '"') break;
-            p++;
-            start = p;
-            while (*p && *p != '"') p++;
-            end = p;
-            if (start >= end) break;
-            len = end - start;
-            if (len >= sizeof(action)) len = sizeof(action) - 1;
-            memcpy(action, start, len);
-            action[len] = '\0';
-            items[count].label = label;
-            items[count].action = action;
-            count++;
-            p++;
-        }
-        kc_wvw_tray_set_menu(ctx, items, count);
-        *result_json = strdup("{\"ok\":true}");
-        return KC_WVW_OK;
-    }
-
-    n = snprintf(NULL, 0,
-        "{\"ok\":false,\"error\":\"unknown method '%s'\"}", method);
-    buf = malloc(n + 1);
-    if (buf) {
-        snprintf(buf, n + 1,
-            "{\"ok\":false,\"error\":\"unknown method '%s'\"}", method);
-    }
-    *result_json = buf;
+    *result_json = strdup(
+        "{\"ok\":false,\"code\":\"METHOD_NOT_FOUND\","
+        "\"message\":\"Bridge method is not allowed.\"}"
+    );
     return KC_WVW_OK;
 }
 
@@ -278,13 +193,10 @@ int main(int argc, char **argv) {
     }
 
     if (bridge_enabled) {
-        const char *allowed[] = {
-            "ping", "echo", "getStats", "notifyHost", "setTrayMenu",
-            NULL
-        };
+        const char *allowed[] = { NULL };
         kc_wvw_bridge_options_t bopts;
         bopts.methods = allowed;
-        bopts.method_count = 5;
+        bopts.method_count = 0;
         bopts.callback = kc_cli_bridge_callback;
         bopts.userdata = NULL;
         bopts.allow_file = 1;

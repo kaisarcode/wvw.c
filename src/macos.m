@@ -312,7 +312,7 @@ static void kc_wvw_bridge_state_free(kc_wvw_bridge_state_t *bridge) {
 static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bridge_options_t *src) {
     int i;
 
-    if (!dst || !src || !src->methods || src->method_count <= 0 || !src->callback) {
+    if (!dst || !src || !src->methods || src->method_count < 0 || !src->callback) {
         return KC_WVW_ERROR;
     }
 
@@ -1331,12 +1331,12 @@ static void kc_wvw_macos_rebuild_tray_menu(kc_wvw_t *ctx) {
             [menu addItem:[NSMenuItem separatorItem]];
         }
 
-        NSMenuItem *showHide = [[NSMenuItem alloc] initWithTitle:@"Show/Hide" action:@selector(kc_wvw_tray_toggle_action:) keyEquivalent:@""];
+        NSMenuItem *showHide = [[NSMenuItem alloc] initWithTitle:@"Show" action:@selector(kc_wvw_tray_toggle_action:) keyEquivalent:@""];
         [menu addItem:showHide];
 
         [menu addItem:[NSMenuItem separatorItem]];
 
-        NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:@"Quit" action:@selector(kc_wvw_tray_quit_action:) keyEquivalent:@""];
+        NSMenuItem *quitItem = [[NSMenuItem alloc] initWithTitle:@"Exit" action:@selector(kc_wvw_tray_quit_action:) keyEquivalent:@""];
         [menu addItem:quitItem];
 
         statusItem.menu = menu;

@@ -45,7 +45,7 @@ Start in fullscreen mode:
 ./bin/x86_64/linux/wvw --url https://example.com --fullscreen
 ```
 
-Open one transparent overlay with the native bridge interactive demo:
+Open one transparent overlay with the native bridge:
 
 ```bash
 ./bin/x86_64/linux/wvw --url "file:///home/kaisar/work/tests/WVW/interactive.html" --borderless --background 00000000 --always-on-top --bridge
@@ -56,15 +56,6 @@ Open one overlay that minimizes to the tray with a system icon:
 ```bash
 ./bin/x86_64/linux/wvw --url "file:///home/kaisar/work/tests/WVW/hud.html" --borderless --background 00000000 --tray emblem-system
 ```
-
-Demo files are available under `tests/WVW/`:
-
-| File | Description |
-| :--- | :--- |
-| `interactive.html` | Panel with bridge buttons (ping, echo, stats, notify). Requires `--bridge`. |
-| `hud.html` | Floating HUD that listens for `nativebridge` stats events. |
-| `notifications.html` | Toast notification system that listens for `nativebridge` notification events. |
-| `index.html` | Minimal transparent panel demo. |
 
 ---
 
@@ -82,7 +73,7 @@ Demo files are available under `tests/WVW/`:
 | `--always-on-top` | Keep the window above normal windows. |
 | `--click-through` | Ignore mouse input on the host window. |
 | `--no-focus` | Prevent the window from activating for keyboard focus. |
-| `--bridge` | Enable NativeBridge with built-in demo methods (`ping`, `echo`, `getStats`, `notifyHost`, `setTrayMenu`). |
+| `--bridge` | Enable NativeBridge.window and NativeBridge.invoke. The standard CLI registers no custom invoke methods. |
 | `--tray [icon]` | Minimize to system tray on close. Optional icon name (Linux) or `.ico` path (Windows). |
 | `-h`, `--help` | Show help and usage. |
 | `-v`, `--version` | Show build version. |
@@ -162,23 +153,10 @@ Bridge rules:
 - The bridge is disabled by default.
 - Remote navigation is blocked when the bridge is active.
 - `localhost` is denied unless the application enables it explicitly.
+- The standard CLI registers no custom invoke methods; unregistered methods return `METHOD_NOT_FOUND`.
 
 `wvw` only hosts the provided URL and does not secure or audit the loaded
 application or server. See `DESIGN.md` for the full security boundary.
-
-### CLI built-in methods
-
-The `--bridge` flag registers five demo methods:
-
-| Method | Description |
-| :--- | :--- |
-| `ping` | Returns `{ok:true, pong:true}`. Use for connectivity checks. |
-| `echo` | Returns the input parameters wrapped in `{ok:true, echo: ...}`. |
-| `getStats` | Returns static mock system stats (`cpu`, `mem`, `bat`, `net`). |
-| `notifyHost` | Logs the payload to stderr and returns `{ok:true, received:true}`. |
-| `setTrayMenu` | Sets a custom tray context menu from the JS side. Params: `{"items":[{"label":"...","action":"..."}]}`. Action `"quit"` is handled natively. |
-
-Any other method returns `{ok:false, error:"unknown method '...'"}`.
 
 ### Bridge built-in window methods
 
@@ -318,9 +296,9 @@ int main(void) {
 - `kc_wvw_set_title(ctx, title)` sets the native window title.
 - `kc_wvw_set_size(ctx, width, height)` sets the native window size.
 - `kc_wvw_get_state(ctx, &state)` retrieves the current window state.
-- `kc_wvw_tray_init(ctx, tooltip, icon)` creates a system-tray / notification-area icon. `tooltip` is the hover text (may be NULL), `icon` is a GTK icon name, a file path, or NULL for default. Left-click toggles the window, right-click opens a context menu.
+- `kc_wvw_tray_init(ctx, tooltip, icon)` creates a system-tray / notification-area icon. `tooltip` is the hover text (may be NULL), `icon` is a GTK icon name, a file path, or NULL for default. Left-click toggles the window, right-click opens a context menu with Show and Exit.
 - `kc_wvw_tray_remove()` removes the tray icon.
-- `kc_wvw_tray_set_menu(ctx, items, count)` replaces the tray context menu with an array of `kc_wvw_tray_item_t` entries. Each entry has a `label` (NULL for separator) and an `action` string. Action `"quit"` is handled natively.
+- `kc_wvw_tray_set_menu(ctx, items, count)` replaces the tray context menu with an array of `kc_wvw_tray_item_t` entries. Each entry has a `label` (NULL for separator) and an `action` string. Action `"quit"` is handled natively. Applications embedding libwvw may replace the default tray menu.
 - `kc_wvw_close()` releases the window, WebView, and associated resources.
 
 Color input accepts `RRGGBB` and `AARRGGBB`. On Windows, alpha must be `00` or `FF` because WebView2 does not support semi-transparent startup colors.
@@ -337,7 +315,7 @@ Overlay-oriented flags:
 - `always_on_top` / `--always-on-top` keeps the host window above normal windows.
 - `click_through` / `--click-through` lets mouse input pass through the host window.
 - `no_focus` / `--no-focus` keeps the host window from stealing keyboard focus.
-- `tray` / `--tray` minimizes the window to the system tray instead of closing. Left-click on tray icon toggles visibility; right-click shows a context menu with Show/Hide and Quit.
+- `tray` / `--tray` hides the window to the system tray instead of closing. Closing the window while tray mode is active hides it. Left-click on tray icon toggles visibility; right-click shows a context menu with Show and Exit. Exit terminates the application.
 
 ---
 

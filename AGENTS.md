@@ -127,7 +127,7 @@ borrowed for the call.
 
 Preserve the existing source set:
 
-- `src/wvw.c` for CLI parsing and demo bridge methods;
+- `src/wvw.c` for CLI parsing and bridge initialization;
 - `src/libwvw.c` for Linux and Windows backends plus shared behavior;
 - `src/macos.m` for the existing Apple backend;
 - `src/libwvw.h` for the public API;

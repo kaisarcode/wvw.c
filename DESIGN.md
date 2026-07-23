@@ -9,13 +9,13 @@ and an opt-in native bridge.
 
 ## Architecture
 
-The CLI builds options, opens one context, optionally enables demo bridge methods
+The CLI builds options, opens one context, optionally enables NativeBridge
 and a tray icon, then enters the native event loop. The library deep-copies
 configuration and owns all native objects.
 
 The source files have fixed responsibilities:
 
-- `src/wvw.c` owns CLI behavior and demo-only bridge callbacks;
+- `src/wvw.c` owns CLI behavior;
 - `src/libwvw.c` owns Linux and Windows implementations;
 - `src/macos.m` owns the current Apple implementation;
 - `src/libwvw.h` defines the common public contract;
@@ -182,13 +182,17 @@ treated as a general browser security policy.
 
 ## Tray and Window Control
 
-Linux and Windows can create one tray icon associated with the window. Closing
-may hide the host instead of terminating when tray mode is active. Left-click
-toggles visibility; right-click exposes default or copied custom menu items.
+Linux, Windows, and macOS can create one tray icon associated with the window.
+Closing the window hides it when tray mode is active. The default tray context
+menu contains Show and Exit. Show restores and focuses the window. Exit
+terminates the application, removes the tray icon, and closes the context.
+Left-click toggles visibility; right-click exposes default or copied custom
+menu items.
 
 The action `quit` is handled natively. Other custom actions are emitted to page
-content as bridge events. Tray item labels and action strings are copied into the
-context.
+content as bridge events. Tray item labels and action strings are copied into
+the context. Applications embedding libwvw may replace the default tray menu
+through `kc_wvw_tray_set_menu`.
 
 Hide, show, and minimize are direct native operations. They do not define an
 application navigation or document lifecycle.
