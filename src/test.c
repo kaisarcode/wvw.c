@@ -234,6 +234,68 @@ static int case_tray_set_menu(void) {
 }
 
 /**
+ * Tests kc_wvw_maximize.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_maximize(void) {
+    int rc;
+
+    rc = 0;
+    rc += expect_int("maximize(NULL) returns ERROR", KC_WVW_ERROR, kc_wvw_maximize(NULL));
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_wvw_restore.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_restore(void) {
+    int rc;
+
+    rc = 0;
+    rc += expect_int("restore(NULL) returns ERROR", KC_WVW_ERROR, kc_wvw_restore(NULL));
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_wvw_set_title.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_set_title(void) {
+    int rc;
+
+    rc = 0;
+    rc += expect_int("set_title(NULL, str) returns ERROR", KC_WVW_ERROR, kc_wvw_set_title(NULL, "test"));
+    rc += expect_int("set_title(ctx, NULL) returns ERROR", KC_WVW_ERROR, kc_wvw_set_title(NULL, NULL));
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_wvw_set_size.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_set_size(void) {
+    int rc;
+
+    rc = 0;
+    rc += expect_int("set_size(NULL, 100, 100) returns ERROR", KC_WVW_ERROR, kc_wvw_set_size(NULL, 100, 100));
+    return rc == 0 ? 0 : 1;
+}
+
+/**
+ * Tests kc_wvw_get_state.
+ * @return 0 on success, 1 on failure.
+ */
+static int case_get_state(void) {
+    kc_wvw_window_state_t state;
+    int rc;
+
+    rc = 0;
+    rc += expect_int("get_state(NULL, &st) returns ERROR", KC_WVW_ERROR, kc_wvw_get_state(NULL, &state));
+    return rc == 0 ? 0 : 1;
+}
+
+/**
  * Runs one libwvw public API test case.
  * @param argc Argument count.
  * @param argv Argument vector.
@@ -260,6 +322,11 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "show") == 0) return case_show();
     if (strcmp(argv[1], "minimize") == 0) return case_minimize();
     if (strcmp(argv[1], "tray-set-menu") == 0) return case_tray_set_menu();
+    if (strcmp(argv[1], "maximize") == 0) return case_maximize();
+    if (strcmp(argv[1], "restore") == 0) return case_restore();
+    if (strcmp(argv[1], "set-title") == 0) return case_set_title();
+    if (strcmp(argv[1], "set-size") == 0) return case_set_size();
+    if (strcmp(argv[1], "get-state") == 0) return case_get_state();
     fprintf(stderr, "unknown test case: %s\n", argv[1]);
     return 2;
 }

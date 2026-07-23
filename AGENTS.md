@@ -45,9 +45,10 @@ Treat all page messages as untrusted. Preserve method-name validation, explicit
 whitelisting, the 65,536-byte message bound where implemented, callback return
 ownership, and valid serialized JSON requirements.
 
-The built-in window methods `hideWindow`, `showWindow`, `minimizeWindow`, and
-`quit` are available whenever the bridge is active, outside the application
-method whitelist. Changes must account for their authority explicitly.
+The built-in window methods `window.minimize`, `window.maximize`,
+`window.restore`, `window.close`, `window.setTitle`, `window.setSize`, and
+`window.getState` are available whenever the bridge is active, outside the
+application method whitelist. Changes must account for their authority explicitly.
 
 Trusted navigation currently includes the initial URL origin, origins listed in
 `TRUSTED_ORIGINS`, and only those file, data, or localhost classes enabled in

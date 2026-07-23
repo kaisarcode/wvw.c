@@ -78,9 +78,10 @@ The bridge is off until `kc_wvw_enable_bridge()` receives at least one valid
 method, a callback, and scheme allowances. Method names must be safe JavaScript
 identifiers and are deep-copied into context state.
 
-Injected JavaScript creates `window.NativeBridge`, assigns one function per
-allowed method, generates string request IDs, tracks callbacks in page memory,
-and exchanges serialized request and response objects with native code.
+Injected JavaScript creates `window.NativeBridge` with a Promise-only API.
+`NativeBridge.invoke(method, params)` returns a Promise that resolves or rejects
+based on the native response. Built-in window methods are resolved internally
+before the application callback; the application cannot override them.
 
 Native responses have one of these shapes:
 
@@ -89,14 +90,19 @@ Native responses have one of these shapes:
 {"id":"...","ok":false,"error":<json>}
 ```
 
+Error objects use normalized codes: `INVALID_REQUEST`, `INVALID_ARGUMENT`,
+`METHOD_NOT_FOUND`, `OPERATION_FAILED`, `WINDOW_CLOSED`, `INTERNAL_ERROR`.
+
 Unsolicited native events are dispatched as `CustomEvent("nativebridge")` with
 the parsed JSON value as event detail.
 
 ## Bridge Authority
 
-Four methods are implemented by the bridge core without application whitelist
-entries: hide, show, minimize, and quit. Application methods are dispatched only
-after exact whitelist lookup.
+Seven window methods are implemented by the bridge core without application
+whitelist entries: `window.minimize`, `window.maximize`, `window.restore`,
+`window.close`, `window.setTitle`, `window.setSize`, and `window.getState`.
+All return Promises. Application methods are dispatched only after exact
+whitelist lookup.
 
 The callback receives borrowed method and params strings and may return one
 allocated serialized JSON value. The library wraps and frees that result. A NULL

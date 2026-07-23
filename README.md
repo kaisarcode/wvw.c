@@ -126,14 +126,24 @@ kc_wvw_options_free(&opts);
 
 `wvw` can inject one native application bridge into trusted local content.
 
-JavaScript request surface:
+JavaScript request surface (all calls return a Promise):
 
 ```js
-window.NativeBridge.MethodName(params, function (err, result) {
-    if (err) {
-        return;
-    }
-});
+NativeBridge.invoke("MethodName", params)
+    .then(function (result) { })
+    .catch(function (err) { });
+```
+
+JavaScript window control surface (built-in, always available when bridge is active):
+
+```js
+NativeBridge.window.minimize()
+NativeBridge.window.maximize()
+NativeBridge.window.restore()
+NativeBridge.window.close()
+NativeBridge.window.setTitle("New Title")
+NativeBridge.window.setSize(width, height)
+NativeBridge.window.getState()  // returns {width, height, minimized, maximized, fullscreen, visible}
 ```
 
 JavaScript event surface:
@@ -166,16 +176,19 @@ The `--bridge` flag registers five demo methods:
 
 Any other method returns `{ok:false, error:"unknown method '...'"}`.
 
-### Bridge built-in methods
+### Bridge built-in window methods
 
-These methods are handled by the bridge core itself and are always available (no whitelist needed):
+These methods are handled by the bridge core itself and are always available (no whitelist needed). All return Promises.
 
-| Method | Description |
-| :--- | :--- |
-| `hideWindow` | Hides the native window. |
-| `showWindow` | Shows and brings the native window to front. |
-| `minimizeWindow` | Minimizes (iconifies) the native window. |
-| `quit` | Closes the window and terminates the process. |
+| Method | Parameters | Description |
+| :--- | :--- | :--- |
+| `window.minimize` | `{}` | Minimizes (iconifies) the native window. |
+| `window.maximize` | `{}` | Maximizes the native window. |
+| `window.restore` | `{}` | Restores from maximized or minimized state. |
+| `window.close` | `{}` | Closes the window and terminates the process. |
+| `window.setTitle` | `{"title":"..."}` | Sets the native window title. Max 4096 chars. |
+| `window.setSize` | `{"width":1024,"height":768}` | Sets the native window size. Max 16384px. |
+| `window.getState` | `{}` | Returns `{width, height, minimized, maximized, fullscreen, visible}`. |
 
 ### Bridge API
 
@@ -212,6 +225,27 @@ Callback contract:
 - On failure, `*result_json` may contain one serialized JSON error object.
 
 `kc_wvw_post_bridge_event()` sends one serialized JSON payload to the current page as the `nativebridge` event detail.
+
+### Window State
+
+```c
+typedef struct {
+    int width;
+    int height;
+    int minimized;
+    int maximized;
+    int fullscreen;
+    int visible;
+} kc_wvw_window_state_t;
+
+int kc_wvw_maximize(kc_wvw_t *ctx);
+int kc_wvw_restore(kc_wvw_t *ctx);
+int kc_wvw_set_title(kc_wvw_t *ctx, const char *title);
+int kc_wvw_set_size(kc_wvw_t *ctx, int width, int height);
+int kc_wvw_get_state(kc_wvw_t *ctx, kc_wvw_window_state_t *state);
+```
+
+Limits: `KC_WVW_TITLE_MAX = 4096`, `KC_WVW_SIZE_MAX = 16384`.
 
 ### Example
 
@@ -275,6 +309,11 @@ int main(void) {
 - `kc_wvw_hide(ctx)` hides the native window.
 - `kc_wvw_show(ctx)` shows and brings the native window to front.
 - `kc_wvw_minimize(ctx)` minimizes (iconifies) the native window.
+- `kc_wvw_maximize(ctx)` maximizes the native window.
+- `kc_wvw_restore(ctx)` restores from maximized or minimized state.
+- `kc_wvw_set_title(ctx, title)` sets the native window title.
+- `kc_wvw_set_size(ctx, width, height)` sets the native window size.
+- `kc_wvw_get_state(ctx, &state)` retrieves the current window state.
 - `kc_wvw_tray_init(ctx, tooltip, icon)` creates a system-tray / notification-area icon. `tooltip` is the hover text (may be NULL), `icon` is a GTK icon name, a file path, or NULL for default. Left-click toggles the window, right-click opens a context menu.
 - `kc_wvw_tray_remove()` removes the tray icon.
 - `kc_wvw_tray_set_menu(ctx, items, count)` replaces the tray context menu with an array of `kc_wvw_tray_item_t` entries. Each entry has a `label` (NULL for separator) and an `action` string. Action `"quit"` is handled natively.

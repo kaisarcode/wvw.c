@@ -23,6 +23,18 @@ typedef struct kc_wvw kc_wvw_t;
 
 #define KC_WVW_BRIDGE_EVENT_NAME "nativebridge"
 
+#define KC_WVW_TITLE_MAX 4096
+#define KC_WVW_SIZE_MAX 16384
+
+typedef struct {
+    int width;
+    int height;
+    int minimized;
+    int maximized;
+    int fullscreen;
+    int visible;
+} kc_wvw_window_state_t;
+
 typedef int (*kc_wvw_bridge_callback_t)(
 kc_wvw_t *ctx,
 const char *method,
@@ -169,6 +181,45 @@ int kc_wvw_show(kc_wvw_t *ctx);
  * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
  */
 int kc_wvw_minimize(kc_wvw_t *ctx);
+
+/**
+ * Maximize the window.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_maximize(kc_wvw_t *ctx);
+
+/**
+ * Restore the window from minimized or maximized state.
+ * @param ctx Window context.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_restore(kc_wvw_t *ctx);
+
+/**
+ * Set the native window title.
+ * @param ctx Window context.
+ * @param title UTF-8 title string.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_set_title(kc_wvw_t *ctx, const char *title);
+
+/**
+ * Resize the native window content area.
+ * @param ctx Window context.
+ * @param width Width in pixels.
+ * @param height Height in pixels.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_set_size(kc_wvw_t *ctx, int width, int height);
+
+/**
+ * Query the current window state.
+ * @param ctx Window context.
+ * @param state Destination state structure.
+ * @return KC_WVW_OK on success or KC_WVW_ERROR on failure.
+ */
+int kc_wvw_get_state(kc_wvw_t *ctx, kc_wvw_window_state_t *state);
 
 /**
  * One entry in a tray context menu.

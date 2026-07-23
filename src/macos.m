@@ -79,6 +79,8 @@ static int kc_wvw_bridge_state_copy(kc_wvw_bridge_state_t *dst, const kc_wvw_bri
 static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge);
 static int kc_wvw_bridge_post_json(kc_wvw_t *ctx, const char *json);
 static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json);
+static char *kc_wvw_bridge_param_string(const char *params, const char *key);
+static int kc_wvw_bridge_param_int(const char *params, const char *key, int *out);
 
 static char *kc_wvw_strdup(const char *text) {
     size_t length;
@@ -448,9 +450,9 @@ static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge) {
         return NULL;
     }
 
-    if (kc_wvw_text_buf_append(&buf, "(function(){if(window.NativeBridge){return;}var __kcWvwPending={};var __kcWvwSeq=0;window.__kcWvwReceive=function(msg){if(msg&&typeof msg.id==='string'){var cb=__kcWvwPending[msg.id];if(cb){delete __kcWvwPending[msg.id];cb(msg.ok?null:(msg.error||{code:'ERROR',message:'Bridge error'}),msg.ok?msg.result:null);}return;}window.dispatchEvent(new CustomEvent('") != KC_WVW_OK ||
+    if (kc_wvw_text_buf_append(&buf, "(function(){if(window.NativeBridge){return;}var __kcWvwPending={};var __kcWvwSeq=0;function __kcWvwReceive(msg){if(msg&&typeof msg.id==='string'){var p=__kcWvwPending[msg.id];if(p){delete __kcWvwPending[msg.id];if(msg.ok){p.resolve(msg.result!==undefined?msg.result:{ok:true});}else{p.reject(msg.error||{code:'INTERNAL_ERROR',message:'Bridge error'});}}return;}window.dispatchEvent(new CustomEvent('") != KC_WVW_OK ||
         kc_wvw_text_buf_append(&buf, KC_WVW_BRIDGE_EVENT_NAME) != KC_WVW_OK ||
-        kc_wvw_text_buf_append(&buf, "',{detail:msg}));};window.NativeBridge={};function __kcWvwSend(method,params,callback){var id=String(++__kcWvwSeq);if(typeof callback==='function'){__kcWvwPending[id]=callback;}window.webkit.messageHandlers.kc_wvw_native.postMessage(JSON.stringify({id:id,method:method,params:params===undefined?null:params}));}") != KC_WVW_OK) {
+        kc_wvw_text_buf_append(&buf, "',{detail:msg}));}window.__kcWvwReceive=__kcWvwReceive;window.NativeBridge={};function __kcWvwSend(method,params){return new Promise(function(resolve,reject){var id=String(++__kcWvwSeq);__kcWvwPending[id]={resolve:resolve,reject:reject};window.webkit.messageHandlers.kc_wvw_native.postMessage(JSON.stringify({id:id,method:method,params:params===undefined?null:params}));});}window.NativeBridge.invoke=function(method,params){return __kcWvwSend(method,params);};window.NativeBridge.window={minimize:function(){return __kcWvwSend('window.minimize');},maximize:function(){return __kcWvwSend('window.maximize');},restore:function(){return __kcWvwSend('window.restore');},close:function(){return __kcWvwSend('window.close');},setTitle:function(title){return __kcWvwSend('window.setTitle',{title:title});},setSize:function(width,height){return __kcWvwSend('window.setSize',{width:width,height:height});},getState:function(){return __kcWvwSend('window.getState');}};") != KC_WVW_OK) {
         free(buf.data);
         return NULL;
     }
@@ -458,9 +460,9 @@ static char *kc_wvw_bridge_bootstrap_script(kc_wvw_bridge_state_t *bridge) {
     for (i = 0; i < bridge->method_count; i++) {
         if (kc_wvw_text_buf_append(&buf, "window.NativeBridge.") != KC_WVW_OK ||
             kc_wvw_text_buf_append(&buf, bridge->methods[i]) != KC_WVW_OK ||
-            kc_wvw_text_buf_append(&buf, "=function(params,callback){return __kcWvwSend('") != KC_WVW_OK ||
+            kc_wvw_text_buf_append(&buf, "=function(params){return __kcWvwSend('") != KC_WVW_OK ||
             kc_wvw_text_buf_append(&buf, bridge->methods[i]) != KC_WVW_OK ||
-            kc_wvw_text_buf_append(&buf, "',params,callback);};") != KC_WVW_OK) {
+            kc_wvw_text_buf_append(&buf, "',params);};") != KC_WVW_OK) {
             free(buf.data);
             return NULL;
         }
@@ -556,7 +558,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
     int rc;
 
     if (!ctx || !json || strlen(json) > KC_WVW_BRIDGE_MAX_MESSAGE) {
-        error = kc_wvw_bridge_error_object("BAD_REQUEST", "Bridge request is invalid.");
+        error = kc_wvw_bridge_error_object("INVALID_REQUEST", "Bridge request is invalid.");
         response = error ? kc_wvw_bridge_wrap_response("0", 0, error) : NULL;
         free(error);
         return response;
@@ -569,58 +571,148 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         free(id);
         free(method);
         free(params);
-        error = kc_wvw_bridge_error_object("BAD_REQUEST", "Bridge request is malformed.");
+        error = kc_wvw_bridge_error_object("INVALID_REQUEST", "Bridge request is malformed.");
         response = error ? kc_wvw_bridge_wrap_response("0", 0, error) : NULL;
         free(error);
         return response;
     }
 
-    if (strcmp(method, "hideWindow") == 0) {
-        if (ctx->ns_window) {
-            @autoreleasepool {
-                NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
-                [window orderOut:nil];
-            }
+    if (strcmp(method, "window.minimize") == 0) {
+        rc = kc_wvw_minimize(ctx);
+        if (rc == KC_WVW_OK) {
+            result = kc_wvw_strdup("{\"ok\":true}");
+            response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        } else {
+            result = NULL;
+            error = kc_wvw_bridge_error_object("WINDOW_CLOSED", "Window is not available.");
+            response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+            free(error);
         }
-        result = kc_wvw_strdup("{\"ok\":true}");
-        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "showWindow") == 0) {
-        if (ctx->ns_window) {
-            @autoreleasepool {
-                NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
-                [window orderFront:nil];
-            }
+    if (strcmp(method, "window.maximize") == 0) {
+        rc = kc_wvw_maximize(ctx);
+        if (rc == KC_WVW_OK) {
+            result = kc_wvw_strdup("{\"ok\":true}");
+            response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        } else {
+            result = NULL;
+            error = kc_wvw_bridge_error_object("WINDOW_CLOSED", "Window is not available.");
+            response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+            free(error);
         }
-        result = kc_wvw_strdup("{\"ok\":true}");
-        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "minimizeWindow") == 0) {
-        if (ctx->ns_window) {
-            @autoreleasepool {
-                NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
-                [window miniaturize:nil];
-            }
+    if (strcmp(method, "window.restore") == 0) {
+        rc = kc_wvw_restore(ctx);
+        if (rc == KC_WVW_OK) {
+            result = kc_wvw_strdup("{\"ok\":true}");
+            response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        } else {
+            result = NULL;
+            error = kc_wvw_bridge_error_object("WINDOW_CLOSED", "Window is not available.");
+            response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+            free(error);
         }
-        result = kc_wvw_strdup("{\"ok\":true}");
-        response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
         free(id); free(method); free(params); free(result);
         return response;
     }
-    if (strcmp(method, "quit") == 0) {
+    if (strcmp(method, "window.close") == 0) {
         kc_wvw_close(ctx);
         result = kc_wvw_strdup("{\"ok\":true}");
         response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
         free(id); free(method); free(params); free(result);
         return response;
     }
+    if (strcmp(method, "window.setTitle") == 0) {
+        char *title = kc_wvw_bridge_param_string(params, "title");
+        if (!title) {
+            error = kc_wvw_bridge_error_object("INVALID_ARGUMENT", "title must be a string.");
+            response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+            free(error);
+            free(id); free(method); free(params);
+            return response;
+        }
+        if (strlen(title) > KC_WVW_TITLE_MAX) {
+            free(title);
+            error = kc_wvw_bridge_error_object("INVALID_ARGUMENT", "title exceeds maximum length.");
+            response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+            free(error);
+            free(id); free(method); free(params);
+            return response;
+        }
+        rc = kc_wvw_set_title(ctx, title);
+        free(title);
+        if (rc == KC_WVW_OK) {
+            result = kc_wvw_strdup("{\"ok\":true}");
+            response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        } else {
+            result = NULL;
+            error = kc_wvw_bridge_error_object("WINDOW_CLOSED", "Window is not available.");
+            response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+            free(error);
+        }
+        free(id); free(method); free(params); free(result);
+        return response;
+    }
+    if (strcmp(method, "window.setSize") == 0) {
+        int width = 0, height = 0;
+        if (kc_wvw_bridge_param_int(params, "width", &width) != KC_WVW_OK ||
+            kc_wvw_bridge_param_int(params, "height", &height) != KC_WVW_OK) {
+            error = kc_wvw_bridge_error_object("INVALID_ARGUMENT", "width and height must be integers.");
+            response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+            free(error);
+            free(id); free(method); free(params);
+            return response;
+        }
+        if (width <= 0 || height <= 0 || width > KC_WVW_SIZE_MAX || height > KC_WVW_SIZE_MAX) {
+            error = kc_wvw_bridge_error_object("INVALID_ARGUMENT", "width and height must be positive integers within bounds.");
+            response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+            free(error);
+            free(id); free(method); free(params);
+            return response;
+        }
+        rc = kc_wvw_set_size(ctx, width, height);
+        if (rc == KC_WVW_OK) {
+            result = kc_wvw_strdup("{\"ok\":true}");
+            response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        } else {
+            result = NULL;
+            error = kc_wvw_bridge_error_object("WINDOW_CLOSED", "Window is not available.");
+            response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+            free(error);
+        }
+        free(id); free(method); free(params); free(result);
+        return response;
+    }
+    if (strcmp(method, "window.getState") == 0) {
+        kc_wvw_window_state_t st;
+        char buf[256];
+        rc = kc_wvw_get_state(ctx, &st);
+        if (rc == KC_WVW_OK) {
+            snprintf(buf, sizeof(buf),
+                "{\"ok\":true,\"state\":{\"width\":%d,\"height\":%d,\"minimized\":%s,\"maximized\":%s,\"fullscreen\":%s,\"visible\":%s}}",
+                st.width, st.height,
+                st.minimized ? "true" : "false",
+                st.maximized ? "true" : "false",
+                st.fullscreen ? "true" : "false",
+                st.visible ? "true" : "false");
+            result = kc_wvw_strdup(buf);
+            response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
+        } else {
+            result = NULL;
+            error = kc_wvw_bridge_error_object("WINDOW_CLOSED", "Window is not available.");
+            response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
+            free(error);
+        }
+        free(id); free(method); free(params); free(result);
+        return response;
+    }
 
     if (!kc_wvw_bridge_method_allowed(&ctx->bridge, method)) {
-        error = kc_wvw_bridge_error_object("METHOD_NOT_ALLOWED", "Bridge method is not allowed.");
+        error = kc_wvw_bridge_error_object("METHOD_NOT_FOUND", "Bridge method is not allowed.");
         response = error ? kc_wvw_bridge_wrap_response(id, 0, error) : NULL;
         free(id);
         free(method);
@@ -638,7 +730,7 @@ static char *kc_wvw_bridge_dispatch_request(kc_wvw_t *ctx, const char *json) {
         response = result ? kc_wvw_bridge_wrap_response(id, 1, result) : NULL;
     } else {
         if (!result) {
-            result = kc_wvw_bridge_error_object("CALL_FAILED", "Bridge callback failed.");
+            result = kc_wvw_bridge_error_object("OPERATION_FAILED", "Bridge callback failed.");
         }
         response = result ? kc_wvw_bridge_wrap_response(id, 0, result) : NULL;
     }
@@ -1096,6 +1188,116 @@ int kc_wvw_minimize(kc_wvw_t *ctx) {
         NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
         [window miniaturize:nil];
     }
+    return KC_WVW_OK;
+}
+
+int kc_wvw_maximize(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->ns_window) {
+        return KC_WVW_ERROR;
+    }
+
+    @autoreleasepool {
+        NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
+        [window zoom:nil];
+    }
+    return KC_WVW_OK;
+}
+
+int kc_wvw_restore(kc_wvw_t *ctx) {
+    if (!ctx || !ctx->ns_window) {
+        return KC_WVW_ERROR;
+    }
+
+    @autoreleasepool {
+        NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
+        if ([window isMiniaturized]) {
+            [window deminiaturize:nil];
+        }
+        if ([window isZoomed]) {
+            [window zoom:nil];
+        }
+    }
+    return KC_WVW_OK;
+}
+
+int kc_wvw_set_title(kc_wvw_t *ctx, const char *title) {
+    if (!ctx || !ctx->ns_window || !title) {
+        return KC_WVW_ERROR;
+    }
+
+    @autoreleasepool {
+        NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
+        NSString *nsTitle = [NSString stringWithUTF8String:title];
+        [window setTitle:nsTitle];
+    }
+    return KC_WVW_OK;
+}
+
+int kc_wvw_set_size(kc_wvw_t *ctx, int width, int height) {
+    if (!ctx || !ctx->ns_window || width <= 0 || height <= 0) {
+        return KC_WVW_ERROR;
+    }
+
+    @autoreleasepool {
+        NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
+        NSRect frame = [window frame];
+        NSSize contentSize = NSMakeSize((CGFloat)width, (CGFloat)height);
+        [window setContentSize:contentSize];
+        (void)frame;
+    }
+    return KC_WVW_OK;
+}
+
+int kc_wvw_get_state(kc_wvw_t *ctx, kc_wvw_window_state_t *state) {
+    if (!ctx || !ctx->ns_window || !state) {
+        return KC_WVW_ERROR;
+    }
+
+    @autoreleasepool {
+        NSWindow *window = (__bridge NSWindow *)ctx->ns_window;
+        NSRect contentRect = [[window contentView] frame];
+        memset(state, 0, sizeof(*state));
+        state->width = (int)contentRect.size.width;
+        state->height = (int)contentRect.size.height;
+        state->minimized = [window isMiniaturized] ? 1 : 0;
+        state->maximized = [window isZoomed] ? 1 : 0;
+        state->fullscreen = [window styleMask] == NSWindowStyleMaskBorderless ? 1 : 0;
+        state->visible = [window isVisible] ? 1 : 0;
+    }
+    return KC_WVW_OK;
+}
+
+static char *kc_wvw_bridge_param_string(const char *params, const char *key) {
+    return kc_wvw_bridge_get_string(params, key);
+}
+
+static int kc_wvw_bridge_param_int(const char *params, const char *key, int *out) {
+    char pattern[64];
+    const char *start;
+    char *end;
+    long value;
+
+    if (!params || !key || !out) {
+        return KC_WVW_ERROR;
+    }
+
+    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
+    start = strstr(params, pattern);
+    if (!start) {
+        return KC_WVW_ERROR;
+    }
+
+    start += strlen(pattern);
+    while (*start == ' ') {
+        start++;
+    }
+
+    value = strtol(start, &end, 10);
+    if (end == start) {
+        return KC_WVW_ERROR;
+    }
+
+    *out = (int)value;
     return KC_WVW_OK;
 }
 
