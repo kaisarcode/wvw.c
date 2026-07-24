@@ -73,7 +73,7 @@ Open one overlay that hides to the tray with a system icon:
 | `--always-on-top` | Keep the window above normal windows. |
 | `--click-through` | Ignore mouse input on the host window. |
 | `--no-focus` | Prevent the window from activating for keyboard focus. |
-| `--bridge` | Enable NativeBridge.window and NativeBridge.invoke. The standard CLI registers no custom invoke methods. |
+| `--bridge` | Enable NativeBridge.window and NativeBridge.invoke |
 | `--tray [icon]` | Hide to system tray. Optional icon name (Linux) or `.ico` path (Windows). |
 | `-h`, `--help` | Show help and usage. |
 | `-v`, `--version` | Show build version. |
